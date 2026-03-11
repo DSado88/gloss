@@ -1,14 +1,21 @@
 /**
  * Client-side JavaScript for the conversation viewer HTML page.
  *
- * This is injected into the generated HTML and runs in the browser.
- * It handles: TOC, annotations, highlights, export, popover, tagging, etc.
+ * This is either inlined into self-contained HTML (export mode) or
+ * served as /assets/client.js (server mode).
  *
- * The function takes sessionId and jsonlPath as parameters so they can be
- * interpolated into the script at build time.
+ * It reads config from a #page-config JSON block (server) or falls back
+ * to defaults for static/export mode. Handles: TOC, annotations,
+ * highlights, export, popover, tagging, live WebSocket updates, etc.
  */
-export function buildClientJs(sessionId: string, jsonlPath: string): string {
+export function buildClientJs(): string {
   return `
+// ── Bootstrap config ──
+const _pageConfig = JSON.parse(document.getElementById('page-config')?.textContent || '{}');
+const SESSION_ID = _pageConfig.sessionId || document.body.dataset.sessionId || '';
+const IS_SERVER = document.body.dataset.mode === 'server';
+const WS_URL = _pageConfig.wsUrl || '';
+
 // ── Theme toggle ──
 function cycleTheme() {
   const html = document.documentElement;
@@ -80,7 +87,7 @@ const convoData = JSON.parse(document.getElementById('conversation-data')?.textC
 
 // ── Annotation state ──
 const bakedAnnotations = JSON.parse(document.getElementById('baked-annotations')?.textContent || '{}');
-const storedAnnotations = JSON.parse(localStorage.getItem('annotations_${sessionId}') || '{}');
+const storedAnnotations = IS_SERVER ? {} : JSON.parse(localStorage.getItem('annotations_' + SESSION_ID) || '{}');
 const annotations = Object.assign({}, bakedAnnotations, storedAnnotations);
 let activeAnnotationId = null;
 let savedRange = null;
@@ -90,6 +97,11 @@ document.addEventListener('DOMContentLoaded', () => {
   restoreAnnotations();
   updateCount();
   document.addEventListener('selectionchange', onSelectionChange);
+  // Server mode: migrate localStorage annotations to API, then connect WS
+  if (IS_SERVER) {
+    migrateLocalStorage();
+    connectWebSocket();
+  }
 });
 
 // Keyboard shortcut: 'h' when text is selected, or Cmd/Ctrl+Shift+H
@@ -387,6 +399,9 @@ function removeAnnotation(targetId) {
     parent.removeChild(mark);
   });
   delete annotations[id];
+  if (IS_SERVER) {
+    fetch('/api/sessions/' + SESSION_ID + '/annotations/' + id, { method: 'DELETE' }).catch(() => {});
+  }
   save();
   updateCount();
   closePopover();
@@ -397,7 +412,63 @@ function removeAnnotation(targetId) {
 
 // ── Persistence ──
 function save() {
-  localStorage.setItem('annotations_${sessionId}', JSON.stringify(annotations));
+  if (IS_SERVER) {
+    // Server mode: POST each annotation to the API
+    if (activeAnnotationId && annotations[activeAnnotationId]) {
+      const ann = annotations[activeAnnotationId];
+      fetch('/api/sessions/' + SESSION_ID + '/annotations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: activeAnnotationId,
+          turnIndex: ann.turnIndex,
+          blockIndex: ann.blockIndex ?? 0,
+          charStart: ann.charStart ?? -1,
+          charEnd: ann.charEnd ?? -1,
+          text: ann.text,
+          comment: ann.comment || '',
+          kind: ann.kind || 'highlight',
+          speaker: ann.role,
+          tags: ann.tags || [],
+        }),
+      }).catch(() => {});
+    }
+  } else {
+    localStorage.setItem('annotations_' + SESSION_ID, JSON.stringify(annotations));
+  }
+}
+
+// One-time migration: push localStorage annotations to server API
+function migrateLocalStorage() {
+  const key = 'annotations_' + SESSION_ID;
+  const stored = localStorage.getItem(key);
+  if (!stored) return;
+  try {
+    const local = JSON.parse(stored);
+    const ids = Object.keys(local);
+    if (!ids.length) return;
+    // POST each annotation
+    for (const id of ids) {
+      const ann = local[id];
+      fetch('/api/sessions/' + SESSION_ID + '/annotations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: id,
+          turnIndex: ann.turnIndex ?? -1,
+          blockIndex: ann.blockIndex ?? 0,
+          charStart: ann.charStart ?? -1,
+          charEnd: ann.charEnd ?? -1,
+          text: ann.text || '',
+          comment: ann.comment || '',
+          kind: ann.kind || 'highlight',
+          speaker: ann.role || ann.speaker,
+          tags: ann.tags || [],
+        }),
+      }).catch(() => {});
+    }
+    localStorage.removeItem(key);
+  } catch {}
 }
 
 function restoreAnnotations() {
@@ -602,7 +673,7 @@ function hoverHighlight(id, on) {
   });
 }
 
-const JSONL_SOURCE = '${jsonlPath}';
+const JSONL_SOURCE = _pageConfig.jsonlPath || '';
 
 // ── Clipboard helper ──
 function copyToClipboard(text, btn) {
@@ -637,7 +708,7 @@ function copyXmlExport(btn) {
   const ids = sortedAnnotationIds();
   if (!ids.length) return;
 
-  const source = JSONL_SOURCE.split('/').pop();
+  const source = JSONL_SOURCE.split('/').pop() || SESSION_ID;
   const date = new Date().toISOString().slice(0, 10);
   const kindOrder = ['decision', 'constraint', 'bug', 'todo', 'question', 'insight', 'highlight'];
 
@@ -681,7 +752,7 @@ function copyMarkdownExport(btn) {
 
   const title = document.querySelector('.header h1')?.textContent || 'Conversation';
   let out = \`## Highlights from \${title}\\n\`;
-  out += 'Source: \\\`' + JSONL_SOURCE + '\\\`\\n\\n';
+  out += 'Source: \\\`' + (JSONL_SOURCE || SESSION_ID) + '\\\`\\n\\n';
 
   ids.forEach((id, i) => {
     const ann = annotations[id];
@@ -759,9 +830,160 @@ function downloadAnnotations() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = '${sessionId}.annotations.json';
+  a.download = (SESSION_ID || 'annotations') + '.annotations.json';
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// ── WebSocket (server mode live updates) ──
+function connectWebSocket() {
+  if (!IS_SERVER || !WS_URL) return;
+
+  let ws;
+  let reconnectDelay = 500;
+  const MAX_RECONNECT_DELAY = 10000;
+
+  // Insert LIVE badge into the controls bar
+  const controls = document.querySelector('.controls');
+  if (controls) {
+    const badge = document.createElement('span');
+    badge.className = 'live-badge';
+    badge.textContent = 'LIVE';
+    badge.id = 'live-badge';
+    badge.style.cursor = 'pointer';
+    badge.onclick = () => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    controls.appendChild(badge);
+  }
+
+  function isNearBottom() {
+    const threshold = 200;
+    return (document.documentElement.scrollHeight - window.scrollY - window.innerHeight) < threshold;
+  }
+
+  function scrollToBottom() {
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
+  }
+
+  function handleMessage(evt) {
+    let msg;
+    try { msg = JSON.parse(evt.data); } catch { return; }
+
+    const convoContainer = document.querySelector('.conversation');
+    const tocBody = document.getElementById('toc-body');
+    if (!convoContainer) return;
+
+    const wasNearBottom = isNearBottom();
+
+    if (msg.type === 'new_turn') {
+      const div = document.createElement('div');
+      div.innerHTML = msg.html;
+      while (div.firstChild) {
+        convoContainer.appendChild(div.firstChild);
+      }
+
+      if (msg.tocHtml && tocBody) {
+        const tocDiv = document.createElement('div');
+        tocDiv.innerHTML = msg.tocHtml;
+        while (tocDiv.firstChild) {
+          tocBody.appendChild(tocDiv.firstChild);
+        }
+      }
+
+      if (msg.convoDataEntry) {
+        try { if (Array.isArray(convoData)) convoData.push(msg.convoDataEntry); } catch {}
+      }
+
+      updateTurnCount(msg.turnIndex + 1);
+
+    } else if (msg.type === 'update_turn') {
+      if (!msg.html) return;
+      const turnEl = document.getElementById('turn-' + msg.turnIndex);
+      if (turnEl) {
+        // Replace existing turn element with updated version
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = msg.html;
+        const newTurn = wrapper.firstElementChild;
+        if (newTurn) {
+          turnEl.replaceWith(newTurn);
+        }
+      } else {
+        // Turn element doesn't exist yet (missed new_turn or empty html) — append it
+        const div = document.createElement('div');
+        div.innerHTML = msg.html;
+        while (div.firstChild) {
+          convoContainer.appendChild(div.firstChild);
+        }
+      }
+
+      if (msg.tocHtml && tocBody) {
+        const existing = tocBody.querySelector('[onclick*="turn-' + msg.turnIndex + '"]');
+        if (existing) {
+          const tocDiv = document.createElement('div');
+          tocDiv.innerHTML = msg.tocHtml;
+          existing.replaceWith(tocDiv.firstElementChild || tocDiv);
+        } else {
+          const tocDiv = document.createElement('div');
+          tocDiv.innerHTML = msg.tocHtml;
+          while (tocDiv.firstChild) {
+            tocBody.appendChild(tocDiv.firstChild);
+          }
+        }
+      }
+
+      if (msg.convoDataEntry) {
+        try {
+          if (Array.isArray(convoData)) {
+            if (msg.turnIndex < convoData.length) {
+              convoData[msg.turnIndex] = msg.convoDataEntry;
+            } else {
+              convoData.push(msg.convoDataEntry);
+            }
+          }
+        } catch {}
+      }
+
+    } else if (msg.type === 'annotation_sync') {
+      // Another tab updated annotations — merge and re-render
+      if (msg.annotations) {
+        Object.assign(annotations, msg.annotations);
+        restoreAnnotations();
+        updateCount();
+        const panel = document.getElementById('export-panel');
+        if (panel && panel.classList.contains('visible')) buildExport();
+      }
+    }
+
+    if (wasNearBottom) {
+      requestAnimationFrame(scrollToBottom);
+    }
+  }
+
+  function updateTurnCount(count) {
+    const metaSpans = document.querySelectorAll('.meta span');
+    for (const span of metaSpans) {
+      if (span.textContent && span.textContent.match(/^\\d+ turns/)) {
+        span.textContent = span.textContent.replace(/^\\d+/, String(count));
+        break;
+      }
+    }
+  }
+
+  function connect() {
+    ws = new WebSocket(WS_URL);
+    ws.onopen = function() {
+      reconnectDelay = 500;
+      document.body.classList.remove('ws-disconnected');
+    };
+    ws.onmessage = handleMessage;
+    ws.onclose = function() {
+      document.body.classList.add('ws-disconnected');
+      setTimeout(connect, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+    };
+    ws.onerror = function() { ws.close(); };
+  }
+
+  connect();
 }
 `;
 }

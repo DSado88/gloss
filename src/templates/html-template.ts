@@ -12,6 +12,10 @@ export interface HtmlPageParams {
   conversationDataJson: string;
   bakedAnnotationsJson: string;
   extraScript?: string;
+  /** 'inline' (default) = self-contained HTML; 'server' = external assets */
+  mode?: "inline" | "server";
+  /** WebSocket URL for server mode */
+  wsUrl?: string;
 }
 
 export function safeForScript(s: string): string {
@@ -19,7 +23,32 @@ export function safeForScript(s: string): string {
 }
 
 export function buildHtmlPage(params: HtmlPageParams): string {
-  const clientJs = buildClientJs(params.sessionId, params.jsonlPath);
+  const mode = params.mode ?? "inline";
+  const isServer = mode === "server";
+
+  // CSS: inline style block vs external link
+  const cssBlock = isServer
+    ? `<link rel="stylesheet" href="/assets/style.css">`
+    : `<style>\n${CSS_STYLES}\n</style>`;
+
+  // JS: external script vs inline
+  const clientJs = isServer ? "" : buildClientJs();
+  const jsBlock = isServer
+    ? `<script src="/assets/client.js"></script>`
+    : `<script>\n${clientJs}\n</script>`;
+
+  // Server mode: embed page config for the client to read
+  const pageConfigBlock = isServer
+    ? `<script type="application/json" id="page-config">${JSON.stringify({
+        sessionId: params.sessionId,
+        wsUrl: params.wsUrl ?? "",
+        mode: "server",
+      })}</script>\n`
+    : "";
+
+  const bodyAttrs = isServer
+    ? `class="hide-tools hide-thinking hide-tagging" data-mode="server"`
+    : `class="hide-tools hide-thinking hide-tagging"`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -31,11 +60,9 @@ ${params.metaComment}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>
-${CSS_STYLES}
-</style>
+${cssBlock}
 </head>
-<body class="hide-tools hide-thinking hide-tagging">
+<body ${bodyAttrs}>
 <div class="header">
   <div class="header-left">
     <h1>${params.title}</h1>
@@ -117,10 +144,8 @@ ${params.conversationHtml}
 
 <script type="application/json" id="conversation-data">${params.conversationDataJson}</script>
 <script type="application/json" id="baked-annotations">${params.bakedAnnotationsJson}</script>
-
-<script>
-${clientJs}
-</script>
+${pageConfigBlock}
+${jsBlock}
 ${params.extraScript ? `<script>\n${params.extraScript}\n</script>` : ""}
 </body>
 </html>

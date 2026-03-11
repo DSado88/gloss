@@ -2,36 +2,29 @@
 import { program } from "commander";
 import { convertJsonlToHtml } from "./convert.js";
 
-// ── Main render command ──
+// ── Serve command (default mode) ──
 program
   .name("convo-viewer")
-  .description("Convert Claude JSONL conversation logs to formatted HTML")
-  .argument("[input...]", "Input JSONL file(s)")
+  .description("Claude conversation viewer — serve or export JSONL conversations");
+
+program
+  .command("serve", { isDefault: true })
+  .description("Start the conversation viewer server (default)")
+  .option("--port <number>", "Port (default: 3456)", parseInt)
+  .action(async (options) => {
+    const { startServer } = await import("./server.js");
+    await startServer({ port: options.port });
+  });
+
+// ── Export command (static HTML) ──
+program
+  .command("export")
+  .description("Export conversation to self-contained HTML")
+  .argument("<input...>", "JSONL file(s)")
   .option("-o, --output <file>", "Output file (single input only)")
   .option("--no-thinking", "Exclude thinking blocks")
   .option("--no-tools", "Exclude tool calls and results")
-  .option("--live", "Start a live server that watches the JSONL file")
-  .option("--port <number>", "Port for the live server (default: 3456)", parseInt)
   .action(async (inputs: string[], options) => {
-    if (options.live) {
-      if (inputs.length !== 1) {
-        console.error("Error: --live requires exactly one input file");
-        process.exit(1);
-      }
-      const { startLiveServer } = await import("./live.js");
-      await startLiveServer(inputs[0], {
-        port: options.port,
-        includeThinking: options.thinking,
-        includeTools: options.tools,
-      });
-      return;
-    }
-
-    if (!inputs.length) {
-      program.help();
-      return;
-    }
-
     if (options.output && inputs.length > 1) {
       console.error("Error: --output cannot be used with multiple input files");
       process.exit(1);
@@ -217,6 +210,65 @@ program
       console.log(`\n  ${annotations.length} highlight(s)`);
     }
 
+    db.close();
+  });
+
+// ── Tag subcommand ──
+program
+  .command("tag")
+  .description("Add or replace tags on annotations")
+  .argument("<annotation-id>", "Annotation ID")
+  .argument("<tags...>", "Tags to set (replaces existing tags)")
+  .action(async (annotationId: string, tags: string[]) => {
+    const { openDb } = await import("./db.js");
+    const db = openDb();
+
+    const ann = db.getAnnotation(annotationId);
+    if (!ann) {
+      console.error(`Annotation not found: ${annotationId}`);
+      db.close();
+      process.exit(1);
+    }
+
+    db.replaceAnnotationTags(annotationId, tags);
+    console.log(`  ${annotationId}: tags set to [${tags.join(", ")}]`);
+    db.close();
+  });
+
+// ── Batch tag subcommand (JSON input for auto-tagging) ──
+program
+  .command("batch-tag")
+  .description("Batch-apply tags from JSON on stdin: [{id, tags}]")
+  .action(async () => {
+    const { openDb } = await import("./db.js");
+    const db = openDb();
+
+    let input = "";
+    for await (const chunk of Bun.stdin.stream()) {
+      input += new TextDecoder().decode(chunk);
+    }
+
+    let items: { id: string; tags: string[] }[];
+    try {
+      items = JSON.parse(input);
+    } catch {
+      console.error("Invalid JSON on stdin. Expected: [{id, tags}]");
+      db.close();
+      process.exit(1);
+    }
+
+    let updated = 0;
+    for (const item of items) {
+      const ann = db.getAnnotation(item.id);
+      if (!ann) {
+        console.error(`  Skipping ${item.id}: not found`);
+        continue;
+      }
+      db.replaceAnnotationTags(item.id, item.tags);
+      console.log(`  ${item.id}: [${item.tags.join(", ")}]`);
+      updated++;
+    }
+    console.log(`\n${updated} annotation(s) tagged`);
     db.close();
   });
 

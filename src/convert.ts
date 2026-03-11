@@ -25,7 +25,13 @@ export function buildPageParams(
   convo: Conversation,
   inputPath: string,
   viewerDir: string,
-  options?: { includeThinking?: boolean; includeTools?: boolean; extraScript?: string }
+  options?: {
+    includeThinking?: boolean;
+    includeTools?: boolean;
+    extraScript?: string;
+    mode?: "inline" | "server";
+    wsUrl?: string;
+  }
 ): HtmlPageParams {
   const includeThinking = options?.includeThinking ?? true;
   const includeTools = options?.includeTools ?? true;
@@ -147,6 +153,8 @@ export function buildPageParams(
     conversationDataJson: safeForScript(conversationDataJson),
     bakedAnnotationsJson: safeForScript(bakedAnnotationsJson),
     extraScript: options?.extraScript,
+    mode: options?.mode ?? "inline",
+    wsUrl: options?.wsUrl,
   };
 }
 

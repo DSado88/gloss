@@ -1,4 +1,4 @@
-import { Database } from "bun:sqlite";
+import { Database, type SQLQueryBindings } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -16,6 +16,7 @@ export interface SessionRecord {
   start_time?: number | null;
   turn_count?: number | null;
   imported_at?: number | null;
+  last_modified?: number | null;
 }
 
 export interface AnnotationRecord {
@@ -79,7 +80,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   model TEXT,
   start_time INTEGER,
   turn_count INTEGER,
-  imported_at INTEGER NOT NULL DEFAULT (unixepoch())
+  imported_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  last_modified INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS annotations (
@@ -132,7 +134,7 @@ END;
 // ---------------------------------------------------------------------------
 
 function defaultDbPath(): string {
-  return path.join(os.homedir(), ".convo", "db.sqlite");
+  return process.env.CONVO_DB_PATH ?? path.join(os.homedir(), ".convo", "db.sqlite");
 }
 
 // ---------------------------------------------------------------------------
@@ -150,15 +152,16 @@ export class ConvoDb {
 
   upsertSession(session: SessionRecord): void {
     this.db.run(
-      `INSERT INTO sessions (id, jsonl_path, title, project, model, start_time, turn_count, imported_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, coalesce(?, unixepoch()))
+      `INSERT INTO sessions (id, jsonl_path, title, project, model, start_time, turn_count, imported_at, last_modified)
+       VALUES (?, ?, ?, ?, ?, ?, ?, coalesce(?, unixepoch()), ?)
        ON CONFLICT(id) DO UPDATE SET
-         jsonl_path  = coalesce(excluded.jsonl_path, jsonl_path),
-         title       = coalesce(excluded.title, title),
-         project     = coalesce(excluded.project, project),
-         model       = coalesce(excluded.model, model),
-         start_time  = coalesce(excluded.start_time, start_time),
-         turn_count  = coalesce(excluded.turn_count, turn_count)`,
+         jsonl_path     = coalesce(excluded.jsonl_path, jsonl_path),
+         title          = coalesce(excluded.title, title),
+         project        = coalesce(excluded.project, project),
+         model          = coalesce(excluded.model, model),
+         start_time     = coalesce(excluded.start_time, start_time),
+         turn_count     = coalesce(excluded.turn_count, turn_count),
+         last_modified  = coalesce(excluded.last_modified, last_modified)`,
       [
         session.id,
         session.jsonl_path ?? null,
@@ -168,6 +171,7 @@ export class ConvoDb {
         session.start_time ?? null,
         session.turn_count ?? null,
         session.imported_at ?? null,
+        session.last_modified ?? null,
       ],
     );
   }
@@ -179,7 +183,7 @@ export class ConvoDb {
 
   listSessions(opts?: { project?: string; limit?: number; offset?: number }): SessionRecord[] {
     const clauses: string[] = [];
-    const params: unknown[] = [];
+    const params: SQLQueryBindings[] = [];
 
     if (opts?.project) {
       clauses.push("project = ?");
@@ -188,7 +192,7 @@ export class ConvoDb {
 
     let sql = "SELECT * FROM sessions";
     if (clauses.length) sql += " WHERE " + clauses.join(" AND ");
-    sql += " ORDER BY imported_at DESC";
+    sql += " ORDER BY coalesce(last_modified, imported_at) DESC";
 
     if (opts?.limit) {
       sql += " LIMIT ?";
@@ -311,7 +315,7 @@ export class ConvoDb {
       INNER JOIN tags t ON t.id = at.tag_id
       WHERE t.name = ?
       ORDER BY a.created_at DESC`;
-    const params: unknown[] = [tagName];
+    const params: SQLQueryBindings[] = [tagName];
 
     if (opts?.limit) {
       sql += " LIMIT ?";
@@ -329,7 +333,7 @@ export class ConvoDb {
     opts?: { tags?: string[]; sessionId?: string; speaker?: string; limit?: number },
   ): AnnotationWithTags[] {
     const clauses: string[] = [];
-    const params: unknown[] = [];
+    const params: SQLQueryBindings[] = [];
 
     // FTS match
     if (query) {
@@ -392,6 +396,37 @@ export class ConvoDb {
       )
       .all(cutoff, limit) as (AnnotationRecord & { session_title: string | null; session_project: string | null })[];
     return rows.map((r) => ({ ...r, tags: this._getTagsForAnnotation(r.id) }));
+  }
+
+  // ---- Batch tag replacement -----------------------------------------------
+
+  replaceAnnotationTags(annotationId: string, tags: string[]): void {
+    const txn = this.db.transaction(() => {
+      // Remove all existing tags for this annotation
+      this.db.run("DELETE FROM annotation_tags WHERE annotation_id = ?", [annotationId]);
+      // Add new tags
+      for (const tagName of tags) {
+        this.addTag(annotationId, tagName);
+      }
+    });
+    txn();
+  }
+
+  // ---- Client-ready annotation export ------------------------------------
+
+  getAnnotationForClient(id: string): (AnnotationWithTags & { prefix?: string; suffix?: string; trigger?: string; turnId?: string }) | null {
+    const ann = this.getAnnotation(id);
+    if (!ann) return null;
+    // The AnnotationRecord stores char offsets but not prefix/suffix/trigger/turnId.
+    // Those are client-side fields. Return what we have; the client fills in the rest.
+    return { ...ann, turnId: `turn-${ann.turn_index}` };
+  }
+
+  // ---- Path-based lookup -------------------------------------------------
+
+  getSessionByPath(jsonlPath: string): SessionRecord | null {
+    const row = this.db.query("SELECT * FROM sessions WHERE jsonl_path = ?").get(jsonlPath) as SessionRecord | null;
+    return row ?? null;
   }
 
   // ---- Import / Export ----------------------------------------------------
@@ -503,6 +538,9 @@ export function openDb(dbPath?: string): ConvoDb {
 
   // Run schema migration
   db.exec(SCHEMA_SQL);
+
+  // Add columns that may not exist in older databases
+  try { db.exec("ALTER TABLE sessions ADD COLUMN last_modified INTEGER"); } catch {}
 
   return new ConvoDb(db);
 }

@@ -87,3 +87,30 @@ export interface ConvoMeta {
   turn_count: number;
   user_turns: number;
 }
+
+/** Bootstrap config embedded in server-mode pages for the client JS. */
+export interface PageBootstrap {
+  sessionId: string;
+  wsUrl: string;
+  mode: "server";
+}
+
+/** Annotation shape sent to/from the server API. */
+export interface ClientAnnotation {
+  id: string;
+  turnIndex: number;
+  blockIndex: number;
+  charStart: number;
+  charEnd: number;
+  text: string;
+  comment: string;
+  kind: string;
+  speaker?: string;
+  role?: string;
+  turnId?: string;
+  prefix?: string;
+  suffix?: string;
+  trigger?: string;
+  tags: string[];
+  created?: string;
+}

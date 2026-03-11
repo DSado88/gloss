@@ -585,4 +585,106 @@ describe("ConvoDb", () => {
       db2.close();
     });
   });
+
+  // -----------------------------------------------------------------------
+  // replaceAnnotationTags (atomic replacement)
+  // -----------------------------------------------------------------------
+
+  describe("replaceAnnotationTags", () => {
+    it("sets tags on an annotation that had none", () => {
+      db.upsertSession({ id: "s1" });
+      db.upsertAnnotation({
+        id: "ann1",
+        session_id: "s1",
+        turn_index: 0,
+        block_index: 0,
+        char_start: 0,
+        char_end: 5,
+        text: "hello",
+      });
+      db.replaceAnnotationTags("ann1", ["foo", "bar"]);
+      const ann = db.getSessionAnnotations("s1");
+      expect(ann[0].tags.sort()).toEqual(["bar", "foo"]);
+    });
+
+    it("replaces existing tags atomically", () => {
+      db.upsertSession({ id: "s1" });
+      db.upsertAnnotation({
+        id: "ann1",
+        session_id: "s1",
+        turn_index: 0,
+        block_index: 0,
+        char_start: 0,
+        char_end: 5,
+        text: "hello",
+      });
+      db.replaceAnnotationTags("ann1", ["old-tag"]);
+      db.replaceAnnotationTags("ann1", ["new-tag-1", "new-tag-2"]);
+      const ann = db.getSessionAnnotations("s1");
+      expect(ann[0].tags.sort()).toEqual(["new-tag-1", "new-tag-2"]);
+    });
+
+    it("clears all tags when given empty array", () => {
+      db.upsertSession({ id: "s1" });
+      db.upsertAnnotation({
+        id: "ann1",
+        session_id: "s1",
+        turn_index: 0,
+        block_index: 0,
+        char_start: 0,
+        char_end: 5,
+        text: "hello",
+      });
+      db.replaceAnnotationTags("ann1", ["tag1", "tag2"]);
+      db.replaceAnnotationTags("ann1", []);
+      const ann = db.getSessionAnnotations("s1");
+      expect(ann[0].tags).toEqual([]);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // getSessionByPath
+  // -----------------------------------------------------------------------
+
+  describe("getSessionByPath", () => {
+    it("finds session by JSONL path", () => {
+      db.upsertSession({ id: "s1", jsonl_path: "/path/to/s1.jsonl" });
+      const found = db.getSessionByPath("/path/to/s1.jsonl");
+      expect(found).not.toBeNull();
+      expect(found!.id).toBe("s1");
+    });
+
+    it("returns null for unknown path", () => {
+      const found = db.getSessionByPath("/no/such/file.jsonl");
+      expect(found).toBeNull();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // upsertSession updates path on re-sync
+  // -----------------------------------------------------------------------
+
+  describe("upsertSession path updates", () => {
+    it("updates jsonl_path when session already exists", () => {
+      db.upsertSession({ id: "s1", jsonl_path: "/old/path.jsonl" });
+      db.upsertSession({ id: "s1", jsonl_path: "/new/path.jsonl" });
+      const session = db.getSession("s1");
+      expect(session!.jsonl_path).toBe("/new/path.jsonl");
+    });
+
+    it("preserves existing fields when upserting with partial data", () => {
+      db.upsertSession({
+        id: "s1",
+        jsonl_path: "/path.jsonl",
+        model: "claude-opus-4-6",
+        project: "/my/project",
+      });
+      // Upsert with only path — other fields should be preserved
+      db.upsertSession({ id: "s1", jsonl_path: "/new-path.jsonl" });
+      const session = db.getSession("s1");
+      expect(session!.jsonl_path).toBe("/new-path.jsonl");
+      expect(session!.model).toBe("claude-opus-4-6");
+      expect(session!.project).toBe("/my/project");
+    });
+  });
 });
