@@ -6,13 +6,13 @@
     "lib": ["ES2022"],
     "strict": true,
     "noEmit": true,
+    "skipLibCheck": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "declaration": true,
     "sourceMap": true,
-    "outDir": "dist",
-    "rootDir": "src"
+    "outDir": "dist"
   },
-  "include": ["src"],
+  "include": ["src", "build.ts"],
   "exclude": ["node_modules", "dist"]
 }

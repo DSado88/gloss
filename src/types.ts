@@ -13,15 +13,15 @@ export interface ToolUseBlock {
   type: "tool_use";
   name: string;
   input: Record<string, unknown>;
-  id: string;
+  id?: string;
 }
 
 export interface ToolResultBlock {
   type: "tool_result";
   content: string;
-  meta: string | null;
-  isError: boolean;
-  toolUseId: string;
+  meta?: string | null;
+  isError?: boolean;
+  toolUseId?: string;
 }
 
 export interface SlashCommandBlock {
@@ -44,7 +44,7 @@ export type Block =
 
 export interface Turn {
   role: "user" | "assistant";
-  timestamp: string;
+  timestamp?: string;
   blocks: Block[];
 }
 
@@ -75,4 +75,15 @@ export interface ConvoDataEntry {
   role: string;
   timestamp: string;
   text: string[];
+}
+
+/** Metadata embedded in rendered HTML files for index generation. */
+export interface ConvoMeta {
+  session_id: string;
+  short_id: string;
+  project_dir: string;
+  model: string;
+  start_time: string;
+  turn_count: number;
+  user_turns: number;
 }
