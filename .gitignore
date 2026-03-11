@@ -2,3 +2,6 @@ __pycache__/
 .squall/
 *.jsonl
 *.html
+node_modules/
+dist/
+*.tgz
