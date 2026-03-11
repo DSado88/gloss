@@ -2245,15 +2245,31 @@ function copyJsonlSlice(btn) {{
     }}
   }});
 
+  // Collect annotations per turn
+  const turnNotes = {{}};
+  ids.forEach(id => {{
+    const ann = annotations[id];
+    const ti = ann.turnIndex ?? -1;
+    if (ti < 0) return;
+    if (!turnNotes[ti]) turnNotes[ti] = [];
+    const note = {{ quote: (ann.text || '').replace(/\\n/g, ' ').substring(0, 200) }};
+    if (ann.comment) note.comment = ann.comment;
+    if (ann.kind && ann.kind !== 'highlight') note.kind = ann.kind;
+    if (ann.tags?.length) note.tags = ann.tags;
+    turnNotes[ti].push(note);
+  }});
+
   const sorted = Array.from(turnIndices).sort((a, b) => a - b);
   const lines = sorted.map(ti => {{
     if (ti < convoData.length) {{
       const turn = convoData[ti];
-      return JSON.stringify({{
+      const entry = {{
         role: turn.role,
         timestamp: turn.timestamp,
         text: turn.text.join('\\n\\n')
-      }});
+      }};
+      if (turnNotes[ti]) entry.annotations = turnNotes[ti];
+      return JSON.stringify(entry);
     }}
     return null;
   }}).filter(Boolean);
