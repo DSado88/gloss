@@ -9,7 +9,7 @@ import { CSS_STYLES } from "./templates/css.js";
 import { renderTurn } from "./renderer.js";
 import { escape } from "./markdown.js";
 import { openDb, type ConvoDb } from "./db.js";
-import { scanProjectsDir, syncToDb } from "./discovery.js";
+import { scanProjectsDir, syncToDb, backfillTurnCounts } from "./discovery.js";
 import { buildServerIndex } from "./index-page.js";
 import type { Turn, TextBlock, TocEntry } from "./types.js";
 import type { ServerWebSocket } from "bun";
@@ -217,11 +217,16 @@ export async function startServer(options: { port?: number } = {}): Promise<void
   // Import legacy sidecar annotations
   importLegacySidecars(db);
 
+  // Background: count turns for sessions that don't have counts yet
+  setTimeout(() => backfillTurnCounts(db), 500);
+
   // Periodic rescan
   setInterval(() => {
     try {
       const freshSessions = scanProjectsDir();
       syncToDb(db, freshSessions);
+      // Backfill turns for any new sessions
+      setTimeout(() => backfillTurnCounts(db), 500);
     } catch {
       // best-effort
     }
@@ -345,6 +350,22 @@ function renderConversationPage(
   const session = db.getSession(sessionId);
   if (!session?.jsonl_path || !fs.existsSync(session.jsonl_path)) {
     return new Response("Conversation not found", { status: 404 });
+  }
+
+  // Guard against OOM on very large files
+  try {
+    const stat = fs.statSync(session.jsonl_path);
+    if (stat.size > 300 * 1024 * 1024) {
+      return new Response(
+        `<html><body style="font-family:system-ui;padding:40px;color:#e6edf3;background:#0d1117">` +
+        `<h2>Session too large to render</h2>` +
+        `<p>This JSONL is ${(stat.size / 1048576).toFixed(0)} MB — too large for in-memory rendering.</p>` +
+        `<p><a href="/" style="color:#da7756">Back to index</a></p></body></html>`,
+        { headers: { "Content-Type": "text/html; charset=utf-8" } },
+      );
+    }
+  } catch {
+    return new Response("Could not stat file", { status: 500 });
   }
 
   // Parse the full JSONL

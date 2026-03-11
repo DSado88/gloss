@@ -356,6 +356,7 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
         model: s.model ?? "",
         last_modified: s.last_modified ?? s.start_time ?? 0,
         turn_count: s.turn_count ?? 0,
+        file_size: s.file_size ?? 0,
       };
     }),
   );
@@ -441,7 +442,7 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
   }
   .session-row {
     display: grid;
-    grid-template-columns: 160px 1fr 100px 60px;
+    grid-template-columns: 160px 1fr 100px 60px 70px;
     gap: 12px;
     align-items: center;
     padding: 10px 14px;
@@ -461,6 +462,12 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
     padding: 8px 14px;
   }
   .session-row.table-header:hover { background: var(--surface); }
+  .session-row.table-header span[data-sort] {
+    cursor: pointer;
+    user-select: none;
+  }
+  .session-row.table-header span[data-sort]:hover { color: var(--accent); }
+  .session-row.table-header span[data-sort].sort-active { color: var(--accent); }
   .s-project { font-size: 0.85rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .s-id {
     font-family: 'SF Mono', 'Fira Code', monospace;
@@ -470,6 +477,7 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
   .s-meta { font-size: 0.78rem; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .s-time { font-size: 0.78rem; color: var(--text2); white-space: nowrap; }
   .s-turns { font-size: 0.78rem; color: var(--text2); text-align: right; }
+  .s-size { font-size: 0.78rem; color: var(--text2); text-align: right; }
   .load-more {
     display: block; width: 100%; padding: 12px;
     background: var(--surface); border: none; color: var(--accent);
@@ -494,7 +502,7 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
   .project-group.collapsed .project-arrow { transform: rotate(-90deg); }
   .project-group.collapsed .group-sessions { display: none; }
   .group-sessions { background: var(--border); display: flex; flex-direction: column; gap: 1px; }
-  .group-sessions .session-row { grid-template-columns: 1fr 100px 60px; }
+  .group-sessions .session-row { grid-template-columns: 1fr 100px 60px 70px; }
   .group-sessions .s-project { display: none; }
 
   .empty { text-align: center; padding: 40px; color: var(--text2); }
@@ -548,7 +556,7 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
 
   @media (max-width: 640px) {
     .session-row { grid-template-columns: 140px 1fr 50px; }
-    .s-meta { display: none; }
+    .s-meta, .s-size { display: none; }
     .group-sessions .session-row { grid-template-columns: 1fr 50px; }
     .s-time { display: none; }
   }
@@ -561,8 +569,7 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
   </div>
   <div class="controls">
     <input class="search" id="search" type="text" placeholder="Search..." autofocus>
-    <button class="view-btn active" data-view="recent" onclick="setView('recent')">Recent</button>
-    <button class="view-btn" data-view="project" onclick="setView('project')">By project</button>
+    <button class="view-btn" id="groupBtn" onclick="toggleGroup()">Group projects</button>
     <div class="filter-wrap">
       <button class="view-btn filter-btn" id="filterBtn" onclick="toggleFilter()">Filter projects</button>
       <div class="filter-drop" id="filterDrop"></div>
@@ -572,10 +579,12 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
 
 <script>
 const ALL = ${sessionsJson};
-let view = 'recent';
+let grouped = false;
 let query = '';
 let showCount = 80;
 let mutedProjects = new Set(JSON.parse(localStorage.getItem('gloss_muted_projects') || '[]'));
+let sortCol = 'last_modified';
+let sortDir = -1; // -1 = descending, 1 = ascending
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
@@ -593,6 +602,39 @@ function fmtTime(ts) {
   if (diff < 604800000) return Math.floor(diff / 86400000) + 'd ago';
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   return months[d.getMonth()] + ' ' + d.getDate();
+}
+
+function fmtSize(bytes) {
+  if (!bytes) return '—';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(0) + ' KB';
+  if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+  return (bytes / 1073741824).toFixed(1) + ' GB';
+}
+
+function sortSessions(list) {
+  return [...list].sort((a, b) => {
+    let av, bv;
+    if (sortCol === 'project') {
+      av = (a.project || a.dirProject || '').toLowerCase();
+      bv = (b.project || b.dirProject || '').toLowerCase();
+      return sortDir * av.localeCompare(bv);
+    }
+    av = a[sortCol] || 0;
+    bv = b[sortCol] || 0;
+    return sortDir * (av - bv);
+  });
+}
+
+function setSort(col) {
+  if (sortCol === col) sortDir = -sortDir;
+  else { sortCol = col; sortDir = -1; }
+  render();
+}
+
+function sortArrow(col) {
+  if (sortCol !== col) return '';
+  return sortDir === -1 ? ' \\u25BE' : ' \\u25B4';
 }
 
 function filter(list) {
@@ -614,19 +656,25 @@ function filter(list) {
   );
 }
 
-function setView(v) {
-  view = v;
+function toggleGroup() {
+  grouped = !grouped;
   showCount = 80;
-  document.querySelectorAll('.view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === v));
+  document.getElementById('groupBtn').classList.toggle('active', grouped);
   render();
 }
 
 function renderRecent(filtered) {
-  const sorted = [...filtered].sort((a, b) => (b.last_modified || 0) - (a.last_modified || 0));
+  const sorted = sortSessions(filtered);
   const visible = sorted.slice(0, showCount);
 
   let html = '<div class="session-table">';
-  html += '<div class="session-row table-header"><span>Project</span><span>Session</span><span>When</span><span style="text-align:right">Turns</span></div>';
+  html += '<div class="session-row table-header">';
+  html += '<span data-sort="project" onclick="setSort(\\'project\\')" class="' + (sortCol==='project'?'sort-active':'') + '">Project' + sortArrow('project') + '</span>';
+  html += '<span>Session</span>';
+  html += '<span data-sort="last_modified" onclick="setSort(\\'last_modified\\')" class="' + (sortCol==='last_modified'?'sort-active':'') + '">When' + sortArrow('last_modified') + '</span>';
+  html += '<span data-sort="turn_count" onclick="setSort(\\'turn_count\\')" style="text-align:right" class="' + (sortCol==='turn_count'?'sort-active':'') + '">Turns' + sortArrow('turn_count') + '</span>';
+  html += '<span data-sort="file_size" onclick="setSort(\\'file_size\\')" style="text-align:right" class="' + (sortCol==='file_size'?'sort-active':'') + '">Size' + sortArrow('file_size') + '</span>';
+  html += '</div>';
   for (const s of visible) {
     const proj = esc(s.project || s.dirProject || '—');
     const model = shortModel(s.model);
@@ -635,6 +683,7 @@ function renderRecent(filtered) {
     html += '<span><span class="s-id">' + s.id + '</span> <span class="s-meta">' + esc(model) + '</span></span>';
     html += '<span class="s-time">' + fmtTime(s.last_modified) + '</span>';
     html += '<span class="s-turns">' + (s.turn_count || '—') + '</span>';
+    html += '<span class="s-size">' + fmtSize(s.file_size) + '</span>';
     html += '</a>';
   }
   if (sorted.length > showCount) {
@@ -672,6 +721,7 @@ function renderByProject(filtered) {
       html += '<span><span class="s-id">' + s.id + '</span> <span class="s-meta">' + esc(model) + '</span></span>';
       html += '<span class="s-time">' + fmtTime(s.last_modified) + '</span>';
       html += '<span class="s-turns">' + (s.turn_count || '—') + '</span>';
+      html += '<span class="s-size">' + fmtSize(s.file_size) + '</span>';
       html += '</a>';
     }
     html += '</div></div>';
@@ -690,7 +740,7 @@ function render() {
     return;
   }
 
-  document.getElementById('content').innerHTML = view === 'recent' ? renderRecent(filtered) : renderByProject(filtered);
+  document.getElementById('content').innerHTML = grouped ? renderByProject(filtered) : renderRecent(filtered);
 }
 
 document.getElementById('search').addEventListener('input', function(e) {

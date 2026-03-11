@@ -215,6 +215,7 @@ describe("discovery", () => {
           model: "claude-opus-4-6",
           startTime: "2024-01-15T10:30:00Z",
           lastModified: Date.now(),
+          fileSize: 12345,
         },
       ];
 
@@ -229,12 +230,12 @@ describe("discovery", () => {
 
     it("updates path when re-syncing same session with new path", () => {
       syncToDb(db, [
-        { id: "s1", path: "/old/path.jsonl", lastModified: Date.now() },
+        { id: "s1", path: "/old/path.jsonl", lastModified: Date.now(), fileSize: 100 },
       ]);
       expect(db.getSession("s1")!.jsonl_path).toBe("/old/path.jsonl");
 
       syncToDb(db, [
-        { id: "s1", path: "/new/path.jsonl", lastModified: Date.now() },
+        { id: "s1", path: "/new/path.jsonl", lastModified: Date.now(), fileSize: 200 },
       ]);
       expect(db.getSession("s1")!.jsonl_path).toBe("/new/path.jsonl");
     });

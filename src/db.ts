@@ -17,6 +17,7 @@ export interface SessionRecord {
   turn_count?: number | null;
   imported_at?: number | null;
   last_modified?: number | null;
+  file_size?: number | null;
 }
 
 export interface AnnotationRecord {
@@ -81,7 +82,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   start_time INTEGER,
   turn_count INTEGER,
   imported_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  last_modified INTEGER
+  last_modified INTEGER,
+  file_size INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS annotations (
@@ -152,8 +154,8 @@ export class ConvoDb {
 
   upsertSession(session: SessionRecord): void {
     this.db.run(
-      `INSERT INTO sessions (id, jsonl_path, title, project, model, start_time, turn_count, imported_at, last_modified)
-       VALUES (?, ?, ?, ?, ?, ?, ?, coalesce(?, unixepoch()), ?)
+      `INSERT INTO sessions (id, jsonl_path, title, project, model, start_time, turn_count, imported_at, last_modified, file_size)
+       VALUES (?, ?, ?, ?, ?, ?, ?, coalesce(?, unixepoch()), ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          jsonl_path     = coalesce(excluded.jsonl_path, jsonl_path),
          title          = coalesce(excluded.title, title),
@@ -161,7 +163,8 @@ export class ConvoDb {
          model          = coalesce(excluded.model, model),
          start_time     = coalesce(excluded.start_time, start_time),
          turn_count     = coalesce(excluded.turn_count, turn_count),
-         last_modified  = coalesce(excluded.last_modified, last_modified)`,
+         last_modified  = coalesce(excluded.last_modified, last_modified),
+         file_size      = coalesce(excluded.file_size, file_size)`,
       [
         session.id,
         session.jsonl_path ?? null,
@@ -172,6 +175,7 @@ export class ConvoDb {
         session.turn_count ?? null,
         session.imported_at ?? null,
         session.last_modified ?? null,
+        session.file_size ?? null,
       ],
     );
   }
@@ -541,6 +545,7 @@ export function openDb(dbPath?: string): ConvoDb {
 
   // Add columns that may not exist in older databases
   try { db.exec("ALTER TABLE sessions ADD COLUMN last_modified INTEGER"); } catch {}
+  try { db.exec("ALTER TABLE sessions ADD COLUMN file_size INTEGER"); } catch {}
 
   return new ConvoDb(db);
 }

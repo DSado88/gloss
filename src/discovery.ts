@@ -11,6 +11,7 @@ export interface DiscoveredSession {
   model?: string;
   startTime?: string;
   lastModified: number;
+  fileSize: number;
 }
 
 /**
@@ -75,6 +76,7 @@ export function scanProjectsDir(
         model: meta.model ?? undefined,
         startTime: meta.startTime ?? undefined,
         lastModified: stat.mtimeMs,
+        fileSize: stat.size,
       });
     } catch {
       // Skip unreadable files
@@ -112,6 +114,122 @@ export function syncToDb(
         ? Math.floor(new Date(session.startTime).getTime() / 1000)
         : undefined,
       last_modified: Math.floor(session.lastModified / 1000),
+      file_size: session.fileSize,
     });
   }
+}
+
+/** Max file size for accurate turn counting (50MB). Larger files use fast estimate. */
+const ACCURATE_COUNT_LIMIT = 50 * 1024 * 1024;
+
+/**
+ * Accurate turn count using IncrementalParser.
+ * Handles consecutive same-role merging and tool-result folding.
+ */
+function countTurnsAccurate(filePath: string): number {
+  const content = fs.readFileSync(filePath, "utf-8");
+  const parser = new IncrementalParser();
+  parser.feedLines(content.split("\n"));
+  return parser.getTurns().length;
+}
+
+/**
+ * Fast line-based turn estimate for large files.
+ * Counts lines containing "type":"user" or "type":"assistant" in 1MB chunks.
+ * Returns a raw message count (higher than actual turns due to merging).
+ * Divides by 2 as a rough approximation since tool results inflate the count.
+ */
+function countTurnsFast(filePath: string): number {
+  const CHUNK = 1024 * 1024;
+  const fd = fs.openSync(filePath, "r");
+  const buf = Buffer.alloc(CHUNK);
+  let count = 0;
+  let leftover = "";
+  let offset = 0;
+
+  try {
+    while (true) {
+      const bytesRead = fs.readSync(fd, buf, 0, CHUNK, offset);
+      if (bytesRead === 0) break;
+      const text = leftover + buf.toString("utf-8", 0, bytesRead);
+      const lines = text.split("\n");
+      leftover = lines.pop() ?? "";
+      for (const line of lines) {
+        if (line.includes('"type":"user"') || line.includes('"type":"assistant"')) {
+          count++;
+        }
+      }
+      offset += bytesRead;
+    }
+    if (leftover && (leftover.includes('"type":"user"') || leftover.includes('"type":"assistant"'))) {
+      count++;
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+
+  // Raw line count is ~3-10x higher than actual turns due to tool result
+  // folding and consecutive-role merging. Divide by 4 as rough estimate.
+  return Math.max(1, Math.round(count / 4));
+}
+
+/**
+ * Count turns for a file, choosing accurate or fast method based on size.
+ */
+function countTurns(filePath: string, fileSize: number): number {
+  if (fileSize <= ACCURATE_COUNT_LIMIT) {
+    return countTurnsAccurate(filePath);
+  }
+  return countTurnsFast(filePath);
+}
+
+/**
+ * Background backfill: count turns for sessions that don't have counts yet.
+ * Skips sessions where turn_count > 0 and file_size hasn't changed.
+ * Processes in batches to avoid blocking the event loop.
+ */
+export function backfillTurnCounts(db: ConvoDb): void {
+  const sessions = db.listSessions({}) as Array<{
+    id: string;
+    jsonl_path?: string | null;
+    turn_count?: number | null;
+    file_size?: number | null;
+  }>;
+
+  const needsCounting = sessions.filter(
+    (s) => s.jsonl_path && (!s.turn_count || s.turn_count === 0),
+  );
+
+  if (needsCounting.length === 0) return;
+
+  console.log(`Counting turns for ${needsCounting.length} sessions...`);
+  let i = 0;
+  let counted = 0;
+
+  const batch = () => {
+    const end = Math.min(i + 5, needsCounting.length);
+    for (; i < end; i++) {
+      const s = needsCounting[i];
+      if (!s.jsonl_path) continue;
+      try {
+        const stat = fs.statSync(s.jsonl_path);
+        if (!stat.isFile()) continue;
+        const turnCount = countTurns(s.jsonl_path, stat.size);
+        if (turnCount > 0) {
+          db.db.run("UPDATE sessions SET turn_count = ? WHERE id = ?", [turnCount, s.id]);
+          counted++;
+        }
+      } catch {
+        // file may have been deleted
+      }
+    }
+
+    if (i < needsCounting.length) {
+      setTimeout(batch, 5); // yield to event loop between batches
+    } else {
+      console.log(`Turn counts: ${counted} sessions updated`);
+    }
+  };
+
+  batch();
 }

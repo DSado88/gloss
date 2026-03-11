@@ -65,7 +65,7 @@ ${cssBlock}
 <body ${bodyAttrs}>
 <div class="header">
   <div class="header-left">
-    <h1>${params.title}</h1>
+    <h1>${params.mode === "server" ? `<a href="/" style="color:inherit;text-decoration:none;opacity:0.5;font-size:0.7em;margin-right:8px" title="Back to index">&larr;</a>` : ""}${params.title}</h1>
     <div class="meta">
       ${params.metaHtml}
     </div>

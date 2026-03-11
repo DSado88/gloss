@@ -92,7 +92,13 @@ export function buildPageParams(
   const userTurns = convo.turns.filter((t) => t.role === "user").length;
   metaParts.push(`<span>${turnCount} turns (${userTurns} user)</span>`);
 
-  const title = `Claude Conversation — ${sessionId}`;
+  // Title: "ProjectName — session-uuid" or just "session-uuid"
+  const projectName = convo.projectDir
+    ? convo.projectDir.replace(/\/+$/, "").split("/").pop() ?? ""
+    : "";
+  const title = projectName
+    ? `${projectName} — ${sessionId}`
+    : sessionId;
 
   // Build TOC
   const tocItems: string[] = [];
