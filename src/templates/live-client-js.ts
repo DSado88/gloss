@@ -14,14 +14,16 @@ export function buildLiveClientJs(wsUrl: string): string {
   let reconnectDelay = 500;
   const MAX_RECONNECT_DELAY = 10000;
 
-  // Insert LIVE badge into the controls bar
+  // Insert LIVE badge into the controls bar (far right)
   const controls = document.querySelector('.controls');
   if (controls) {
     const badge = document.createElement('span');
     badge.className = 'live-badge';
     badge.textContent = 'LIVE';
     badge.id = 'live-badge';
-    controls.insertBefore(badge, controls.firstChild);
+    badge.style.cursor = 'pointer';
+    badge.onclick = () => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    controls.appendChild(badge);
   }
 
   // Reference to conversation data array (maintained by main client JS)

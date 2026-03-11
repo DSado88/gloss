@@ -889,6 +889,7 @@ export const CSS_STYLES = `
 
   /* ── Live mode badge ── */
   .live-badge {
+    margin-left: auto;
     background: #e53e3e;
     color: white;
     font-size: 11px;
