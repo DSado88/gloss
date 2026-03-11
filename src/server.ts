@@ -350,16 +350,36 @@ function renderConversationPage(
   // Parse the full JSONL
   const parser = new IncrementalParser();
   const content = fs.readFileSync(session.jsonl_path, "utf-8");
-  parser.feedLines(content.split("\n"));
+  const lines = content.split("\n");
+  parser.feedLines(lines);
 
   const meta = parser.getMetadata();
+  const turns = parser.getTurns();
+
+  if (turns.length === 0 && lines.length > 1) {
+    // Debug: count parseable lines and their types
+    const types = new Map<string, number>();
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const obj = JSON.parse(line);
+        const t = obj.type ?? "unknown";
+        types.set(t, (types.get(t) ?? 0) + 1);
+      } catch { /* skip */ }
+    }
+    console.warn(
+      `[gloss] Session ${sessionId}: 0 turns parsed from ${lines.length} lines (${session.jsonl_path}).` +
+      ` Line types: ${[...types.entries()].map(([k, v]) => `${k}=${v}`).join(", ")}`,
+    );
+  }
+
   const convo = {
     sessionId: meta.sessionId ?? sessionId,
     projectDir: meta.projectDir,
     model: meta.model,
     version: meta.version,
     startTime: meta.startTime,
-    turns: parser.getTurns(),
+    turns,
   };
 
   const viewerDir = path.join(os.homedir(), ".claude", "viewer");
