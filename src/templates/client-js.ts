@@ -213,7 +213,7 @@ function annotate() {
 
   // Store annotation
   annotations[id] = {
-    text: text.slice(0, 500),
+    text: text,
     comment: '',
     role: role,
     time: time,
@@ -579,7 +579,7 @@ function copyXmlExport(btn) {
     grouped[kind].forEach(({ id, ann }) => {
       const turnIdx = ann.turnIndex ?? -1;
       const speaker = ann.role || '?';
-      const quote = (ann.text || '').replace(/\\n/g, ' ').slice(0, 500);
+      const quote = (ann.text || '').replace(/\\n/g, ' ');
 
       xml += \`  <highlight turn="\${turnIdx}" speaker="\${speaker}" kind="\${kind}"\`;
       if (ann.tags && ann.tags.length) xml += \` tags="\${ann.tags.join(',')}"\`;
@@ -612,7 +612,7 @@ function copyMarkdownExport(btn) {
     const time = ann.time ? \`, \${ann.time}\` : '';
     const turnRef = ann.turnIndex ?? (ann.turnId ? ann.turnId.replace('turn-', '') : '?');
     const kindLabel = (ann.kind && ann.kind !== 'highlight') ? \` [\${ann.kind}]\` : '';
-    const quote = ann.text.replace(/\\n/g, ' ').slice(0, 300);
+    const quote = ann.text.replace(/\\n/g, ' ');
 
     out += \`\${i + 1}. [\${speaker}\${time}, turn #\${turnRef}]\${kindLabel} "\${quote}"\\n\`;
 
