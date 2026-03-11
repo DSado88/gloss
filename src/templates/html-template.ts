@@ -16,10 +16,16 @@ export interface HtmlPageParams {
   mode?: "inline" | "server";
   /** WebSocket URL for server mode */
   wsUrl?: string;
+  /** User-defined custom name/note for the conversation */
+  customTitle?: string;
 }
 
 export function safeForScript(s: string): string {
   return s.replace(/<\//g, "<\\/");
+}
+
+export function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 export function buildHtmlPage(params: HtmlPageParams): string {
@@ -66,6 +72,7 @@ ${cssBlock}
 <div class="header">
   <div class="header-left">
     <h1>${params.mode === "server" ? `<a href="/" style="color:inherit;text-decoration:none;opacity:0.5;font-size:0.7em;margin-right:8px" title="Back to index">&larr;</a>` : ""}${params.title}</h1>
+    ${params.mode === "server" ? `<div class="custom-title" id="custom-title" contenteditable="plaintext-only" data-placeholder="Add a name or note..." spellcheck="false" oninput="saveCustomTitle()" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}">${params.customTitle ? escapeHtml(params.customTitle) : ""}</div>` : ""}
     <div class="meta">
       ${params.metaHtml}
     </div>

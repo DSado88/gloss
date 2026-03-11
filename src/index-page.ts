@@ -350,6 +350,7 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
 
       return {
         id: s.id,
+        title: s.title ?? "",
         project: shortProject || dirProject || "",
         fullProject: project,
         dirProject,
@@ -475,6 +476,7 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
     color: var(--accent);
   }
   .s-meta { font-size: 0.78rem; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .s-title { font-size: 0.78rem; color: var(--accent); font-weight: 500; margin-left: 6px; }
   .s-time { font-size: 0.78rem; color: var(--text2); white-space: nowrap; }
   .s-turns { font-size: 0.78rem; color: var(--text2); text-align: right; }
   .s-size { font-size: 0.78rem; color: var(--text2); text-align: right; }
@@ -652,7 +654,8 @@ function filter(list) {
     s.dirProject.toLowerCase().includes(q) ||
     s.fullProject.toLowerCase().includes(q) ||
     s.model.toLowerCase().includes(q) ||
-    s.id.toLowerCase().includes(q)
+    s.id.toLowerCase().includes(q) ||
+    (s.title && s.title.toLowerCase().includes(q))
   );
 }
 
@@ -680,7 +683,8 @@ function renderRecent(filtered) {
     const model = shortModel(s.model);
     html += '<a class="session-row" href="/c/' + s.id + '">';
     html += '<span class="s-project" title="' + esc(s.fullProject) + '">' + proj + '</span>';
-    html += '<span><span class="s-id">' + s.id + '</span> <span class="s-meta">' + esc(model) + '</span></span>';
+    const titleBit = s.title ? ' <span class="s-title">' + esc(s.title) + '</span>' : '';
+    html += '<span><span class="s-id">' + s.id + '</span>' + titleBit + ' <span class="s-meta">' + esc(model) + '</span></span>';
     html += '<span class="s-time">' + fmtTime(s.last_modified) + '</span>';
     html += '<span class="s-turns">' + (s.turn_count || '—') + '</span>';
     html += '<span class="s-size">' + fmtSize(s.file_size) + '</span>';
@@ -718,7 +722,8 @@ function renderByProject(filtered) {
       const model = shortModel(s.model);
       html += '<a class="session-row" href="/c/' + s.id + '">';
       html += '<span class="s-project">' + esc(name) + '</span>';
-      html += '<span><span class="s-id">' + s.id + '</span> <span class="s-meta">' + esc(model) + '</span></span>';
+      const titleBit = s.title ? ' <span class="s-title">' + esc(s.title) + '</span>' : '';
+      html += '<span><span class="s-id">' + s.id + '</span>' + titleBit + ' <span class="s-meta">' + esc(model) + '</span></span>';
       html += '<span class="s-time">' + fmtTime(s.last_modified) + '</span>';
       html += '<span class="s-turns">' + (s.turn_count || '—') + '</span>';
       html += '<span class="s-size">' + fmtSize(s.file_size) + '</span>';

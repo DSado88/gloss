@@ -42,6 +42,36 @@ export function formatTimestamp(tsStr: string): string {
 }
 
 /**
+ * Extract the date portion from a timestamp string as "Mon D" (e.g. "Jan 5").
+ * Returns empty string on error.
+ */
+export function formatDateShort(tsStr: string): string {
+  if (!tsStr) return "";
+  try {
+    const dt = new Date(tsStr.replace("Z", "+00:00"));
+    if (isNaN(dt.getTime())) return "";
+    return dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Get the calendar date key (YYYY-MM-DD local) for a timestamp.
+ * Used to detect day boundaries between turns.
+ */
+export function dateKey(tsStr: string): string {
+  if (!tsStr) return "";
+  try {
+    const dt = new Date(tsStr.replace("Z", "+00:00"));
+    if (isNaN(dt.getTime())) return "";
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Render a tool_use block to HTML.
  */
 export function renderToolUse(block: ToolUseBlock): string {
@@ -162,6 +192,7 @@ export function renderTurn(
   turnIndex: number,
   includeThinking: boolean,
   includeTools: boolean,
+  prevTimestamp?: string,
 ): { html: string; tocEntry: TocEntry | null } {
   const role = turn.role;
   const timestamp = formatTimestamp(turn.timestamp ?? "");
@@ -237,11 +268,19 @@ export function renderTurn(
   const turnId = `turn-${turnIndex}`;
   const contentHtml = blocksHtml.join("\n");
   const label = role === "user" ? "You" : "Claude";
+
+  // Show date when it changes from previous turn
+  const curDate = dateKey(turn.timestamp ?? "");
+  const prevDate = dateKey(prevTimestamp ?? "");
+  const dateDividerHtml = curDate && curDate !== prevDate
+    ? `<div class="date-divider"><span>${formatDateShort(turn.timestamp ?? "")}</span></div>\n`
+    : "";
+
   const tsHtml = timestamp
     ? `<span class="timestamp">${timestamp}</span>`
     : "";
 
-  const html = `<div class="turn ${role}" id="${turnId}">
+  const html = `${dateDividerHtml}<div class="turn ${role}" id="${turnId}">
   <div class="turn-header">
     <span class="role-label">${label}</span>
     ${tsHtml}

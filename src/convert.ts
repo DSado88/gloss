@@ -43,11 +43,13 @@ export function buildPageParams(
   const tocEntries: TocEntry[] = [];
 
   for (let i = 0; i < convo.turns.length; i++) {
+    const prevTs = i > 0 ? convo.turns[i - 1].timestamp : undefined;
     const { html, tocEntry } = renderTurn(
       convo.turns[i],
       i,
       includeThinking,
-      includeTools
+      includeTools,
+      prevTs
     );
     if (html) {
       turnsHtml.push(html);

@@ -135,11 +135,14 @@ function processFileChanges(
   const updates = state.parser.feedLines(lines);
 
   for (const update of updates) {
+    const allTurns = state.parser.getTurns();
+    const prevTs = update.turnIndex > 0 ? allTurns[update.turnIndex - 1]?.timestamp : undefined;
     const { html, tocEntry } = renderTurn(
       update.turn,
       update.turnIndex,
       includeThinking,
       includeTools,
+      prevTs,
     );
 
     // Skip broadcasting turns with no renderable content
@@ -420,6 +423,11 @@ function renderConversationPage(
     wsUrl,
   });
 
+  // Pass custom title from DB if set
+  if (session.title) {
+    params.customTitle = session.title;
+  }
+
   // Override baked annotations with DB data
   if (dbAnnotations.length > 0) {
     params.bakedAnnotationsJson = safeForScript(JSON.stringify(bakedObj));
@@ -541,6 +549,16 @@ export async function handleApiRoute(
         .map((b) => b.text || ""),
     }));
     return new Response(JSON.stringify(convoData), { headers: jsonHeaders });
+  }
+
+  // PATCH /api/sessions/:id/title
+  const titleMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/title$/);
+  if (titleMatch && req.method === "PATCH") {
+    const sessionId = titleMatch[1];
+    const body = (await req.json()) as Record<string, unknown>;
+    const title = (body.title as string) ?? "";
+    db.db.run("UPDATE sessions SET title = ? WHERE id = ?", [title || null, sessionId]);
+    return new Response(JSON.stringify({ ok: true }), { headers: jsonHeaders });
   }
 
   return new Response("Not Found", { status: 404 });

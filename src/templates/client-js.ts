@@ -835,6 +835,23 @@ function downloadAnnotations() {
   URL.revokeObjectURL(url);
 }
 
+// ── Custom title (server mode) ──
+let _titleTimer = null;
+function saveCustomTitle() {
+  if (!IS_SERVER) return;
+  clearTimeout(_titleTimer);
+  _titleTimer = setTimeout(function() {
+    const el = document.getElementById('custom-title');
+    if (!el) return;
+    const text = (el.textContent || '').trim();
+    fetch('/api/sessions/' + SESSION_ID + '/title', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: text }),
+    }).catch(function() {});
+  }, 500);
+}
+
 // ── WebSocket (server mode live updates) ──
 function connectWebSocket() {
   if (!IS_SERVER || !WS_URL) return;

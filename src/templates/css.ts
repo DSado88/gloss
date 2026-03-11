@@ -122,6 +122,25 @@ export const CSS_STYLES = `
     letter-spacing: -0.03em;
   }
 
+  .custom-title {
+    font-size: 13px;
+    color: var(--text2);
+    padding: 2px 4px;
+    margin: -2px -4px 4px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    outline: none;
+    min-height: 1.3em;
+    transition: border-color 0.15s;
+  }
+  .custom-title:hover { border-color: var(--border); }
+  .custom-title:focus { border-color: var(--accent); color: var(--text); }
+  .custom-title:empty::before {
+    content: attr(data-placeholder);
+    color: var(--text-muted);
+    opacity: 0.5;
+  }
+
   .header .meta {
     font-size: 12px;
     color: var(--text-muted);
@@ -554,6 +573,32 @@ export const CSS_STYLES = `
     font-size: 13px;
     color: var(--accent);
     font-weight: 500;
+  }
+
+  /* Date divider between turns on different days */
+  .date-divider {
+    text-align: center;
+    padding: 12px 0 4px;
+    position: relative;
+  }
+  .date-divider::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 1px;
+    background: var(--border);
+  }
+  .date-divider span {
+    position: relative;
+    background: var(--bg);
+    padding: 2px 14px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+    border-radius: 10px;
+    border: 1px solid var(--border);
   }
 
   /* Session continuation divider */
