@@ -146,20 +146,25 @@ def render_markdown_inline(text: str) -> str:
     Not a full parser — just enough for readable conversations.
     """
     # Fenced code blocks first (``` ... ```)
+    # Use sentinel markers to avoid false matches when source text contains literal <pre>
+    _PRE_OPEN = "\x00PRE_OPEN\x00"
+    _PRE_CLOSE = "\x00PRE_CLOSE\x00"
+
     def replace_code_block(m):
         lang = escape(m.group(1) or "")
         code = escape(m.group(2).strip())
         lang_attr = f' class="language-{lang}"' if lang else ""
-        return f'<pre><code{lang_attr}>{code}</code></pre>'
+        return f'{_PRE_OPEN}<code{lang_attr}>{code}</code>{_PRE_CLOSE}'
 
     text = re.sub(r"```(\w*)\n(.*?)```", replace_code_block, text, flags=re.DOTALL)
 
-    # Split on <pre> blocks to avoid processing code contents
-    parts = re.split(r"(<pre>.*?</pre>)", text, flags=re.DOTALL)
+    # Split on sentinel-marked code blocks to avoid processing their contents
+    parts = re.split(f"({re.escape(_PRE_OPEN)}.*?{re.escape(_PRE_CLOSE)})", text, flags=re.DOTALL)
     processed = []
     for part in parts:
-        if part.startswith("<pre>"):
-            processed.append(part)
+        if part.startswith(_PRE_OPEN):
+            # Replace sentinels with real <pre> tags
+            processed.append(part.replace(_PRE_OPEN, "<pre>").replace(_PRE_CLOSE, "</pre>"))
             continue
 
         # Convert markdown tables before escaping (tables use | which is safe)
@@ -537,12 +542,14 @@ def render_turn(turn: dict, turn_index: int, include_thinking: bool, include_too
     blocks_html = []
     first_text = ""
 
+    text_block_idx = 0
     for block in turn["blocks"]:
         btype = block["type"]
 
         if btype == "text":
             rendered = render_markdown_inline(block["text"])
-            blocks_html.append(f'<div class="message-text"><p>{rendered}</p></div>')
+            blocks_html.append(f'<div class="message-text" data-block-index="{text_block_idx}"><p>{rendered}</p></div>')
+            text_block_idx += 1
             if not first_text:
                 first_text = block["text"]
 
@@ -610,6 +617,7 @@ def render_turn(turn: dict, turn_index: int, include_thinking: bool, include_too
 HTML_TEMPLATE = """\
 <!DOCTYPE html>
 <html lang="en">
+{meta_comment}
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1317,6 +1325,54 @@ HTML_TEMPLATE = """\
     text-overflow: ellipsis;
   }}
 
+  /* Kind chips */
+  .kind-chips {{
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }}
+  .kind-chip {{
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text2);
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s;
+  }}
+  .kind-chip:hover {{ background: var(--surface2); }}
+  .kind-chip.active {{
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }}
+  .tags-row input {{
+    width: 100%;
+    font-size: 12px;
+    padding: 5px 8px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text);
+    font-family: inherit;
+    margin-bottom: 6px;
+    outline: none;
+  }}
+  .tags-row input:focus {{ border-color: var(--accent); }}
+
+  /* Kind badge in highlights panel */
+  .hl-kind-badge {{
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: var(--surface2);
+    color: var(--text2);
+    margin-left: 6px;
+  }}
+
   /* Export panel */
   .export-panel {{
     display: none;
@@ -1403,6 +1459,19 @@ HTML_TEMPLATE = """\
     margin-top: 4px;
     font-style: italic;
   }}
+  .hl-item-tags {{
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+  }}
+  .hl-tag {{
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 6px;
+    background: var(--surface2);
+    color: var(--text2);
+  }}
   .hl-empty {{
     text-align: center;
     color: var(--text-tertiary);
@@ -1429,6 +1498,8 @@ HTML_TEMPLATE = """\
     transition: all 0.1s;
   }}
   .export-panel-footer button:hover {{ background: var(--tab-hover); }}
+  .export-panel-footer button.primary {{ background: var(--accent); color: #fff; }}
+  .export-panel-footer button.primary:hover {{ opacity: 0.85; }}
   .export-panel-footer button.primary {{ background: var(--accent); color: #fff; }}
   .export-panel-footer button.primary:hover {{ background: var(--accent-hover); }}
 </style>
@@ -1473,6 +1544,10 @@ HTML_TEMPLATE = """\
 
 <div class="comment-popover" id="comment-popover">
   <div class="comment-preview" id="comment-preview"></div>
+  <div class="kind-chips" id="kind-chips"></div>
+  <div class="tags-row">
+    <input type="text" id="tags-input" placeholder="Tags (comma-separated)">
+  </div>
   <textarea id="comment-input" placeholder="Add a comment..." rows="3"></textarea>
   <div class="comment-actions">
     <button onclick="removeAnnotation()">Remove</button>
@@ -1492,9 +1567,15 @@ HTML_TEMPLATE = """\
     <div id="highlights-list"></div>
   </div>
   <div class="export-panel-footer">
-    <button onclick="copyExport()">Copy as markdown</button>
+    <button onclick="copyJsonlSlice(this)" title="Copy exchange-window JSONL to clipboard">Slice</button>
+    <button onclick="copyMarkdownExport(this)">Markdown</button>
+    <button onclick="copyXmlExport(this)" class="primary" title="Structured XML optimized for Claude context injection">For Claude</button>
+    <button onclick="downloadAnnotations()" title="Download annotations JSON for backup/bake-in">&#8615;</button>
   </div>
 </div>
+
+<script type="application/json" id="conversation-data">\x00CONVO_DATA\x00</script>
+<script type="application/json" id="baked-annotations">\x00BAKED_ANNOTATIONS\x00</script>
 
 <script>
 // ── TOC ──
@@ -1521,8 +1602,13 @@ function filterToc(filter, btn) {{
   }});
 }}
 
+// ── Conversation data (for trigger capture and JSONL slice export) ──
+const convoData = JSON.parse(document.getElementById('conversation-data')?.textContent || '[]');
+
 // ── Annotation state ──
-const annotations = JSON.parse(localStorage.getItem('annotations_{session_id}') || '{{}}');
+const bakedAnnotations = JSON.parse(document.getElementById('baked-annotations')?.textContent || '{{}}');
+const storedAnnotations = JSON.parse(localStorage.getItem('annotations_{session_id}') || '{{}}');
+const annotations = Object.assign({{}}, bakedAnnotations, storedAnnotations);
 let activeAnnotationId = null;
 
 // Restore saved annotations on load
@@ -1600,6 +1686,27 @@ function wrapTextNodes(range, id) {{
   }});
 }}
 
+// ── Compute trigger context ──
+function computeTrigger(ann) {{
+  if (ann.trigger) return ann.trigger;
+  const ti = ann.turnIndex ?? -1;
+  if (ti < 0 || !convoData.length) return '';
+  if (ann.role === 'Claude' && ti > 0) {{
+    for (let i = ti - 1; i >= 0; i--) {{
+      if (convoData[i].role === 'user' && convoData[i].text.length) {{
+        return 'User: "' + convoData[i].text[0].replace(/\\n/g, ' ').slice(0, 150) + '"';
+      }}
+    }}
+  }} else if (ann.role === 'You' && ti < convoData.length - 1) {{
+    for (let i = ti + 1; i < convoData.length; i++) {{
+      if (convoData[i].role === 'assistant' && convoData[i].text.length) {{
+        return 'Claude: "' + convoData[i].text[0].replace(/\\n/g, ' ').slice(0, 150) + '"';
+      }}
+    }}
+  }}
+  return '';
+}}
+
 // ── Highlight selected text ──
 function annotate() {{
   const sel = window.getSelection();
@@ -1617,6 +1724,56 @@ function annotate() {{
   const role = turnEl?.querySelector('.role-label')?.textContent || '?';
   const time = turnEl?.querySelector('.timestamp')?.textContent || '';
   const turnId = turnEl?.id || '';
+  const turnIndex = turnId ? parseInt(turnId.replace('turn-', ''), 10) : -1;
+
+  // Find block index and character offsets
+  const startNode = range.startContainer.nodeType === 3 ? range.startContainer : range.startContainer.childNodes[range.startOffset] || range.startContainer;
+  const msgText = startNode.parentElement?.closest('.message-text[data-block-index]');
+  const blockIndex = msgText ? parseInt(msgText.getAttribute('data-block-index'), 10) : 0;
+
+  // Compute char offsets within the message-text element
+  let charStart = -1, charEnd = -1;
+  if (msgText) {{
+    const tw = document.createTreeWalker(msgText, NodeFilter.SHOW_TEXT, null);
+    let offset = 0, n;
+    while ((n = tw.nextNode())) {{
+      if (n === range.startContainer) {{ charStart = offset + range.startOffset; }}
+      if (n === range.endContainer) {{ charEnd = offset + range.endOffset; break; }}
+      offset += n.textContent.length;
+    }}
+  }}
+
+  // Compute prefix/suffix from convoData
+  let prefix = '', suffix = '';
+  if (turnIndex >= 0 && convoData[turnIndex] && convoData[turnIndex].text[blockIndex]) {{
+    const blockText = convoData[turnIndex].text[blockIndex];
+    // Use indexOf on rendered text as fallback for offset mapping
+    const idx = blockText.indexOf(text.slice(0, 60));
+    if (idx >= 0) {{
+      prefix = blockText.slice(Math.max(0, idx - 50), idx);
+      suffix = blockText.slice(idx + text.length, idx + text.length + 50);
+    }}
+  }}
+
+  // Compute trigger (preceding user msg for Claude, next assistant for user)
+  let trigger = '';
+  if (turnIndex >= 0 && convoData.length) {{
+    if (role === 'Claude' && turnIndex > 0) {{
+      for (let i = turnIndex - 1; i >= 0; i--) {{
+        if (convoData[i].role === 'user' && convoData[i].text.length) {{
+          trigger = 'User: "' + convoData[i].text[0].replace(/\\n/g, ' ').slice(0, 150) + '"';
+          break;
+        }}
+      }}
+    }} else if (role === 'You' && turnIndex < convoData.length - 1) {{
+      for (let i = turnIndex + 1; i < convoData.length; i++) {{
+        if (convoData[i].role === 'assistant' && convoData[i].text.length) {{
+          trigger = 'Claude: "' + convoData[i].text[0].replace(/\\n/g, ' ').slice(0, 150) + '"';
+          break;
+        }}
+      }}
+    }}
+  }}
 
   // Wrap all text nodes in the range
   wrapTextNodes(range, id);
@@ -1630,6 +1787,15 @@ function annotate() {{
     role: role,
     time: time,
     turnId: turnId,
+    turnIndex: turnIndex,
+    blockIndex: blockIndex,
+    charStart: charStart,
+    charEnd: charEnd,
+    prefix: prefix,
+    suffix: suffix,
+    trigger: trigger,
+    kind: 'highlight',
+    tags: [],
     created: new Date().toISOString()
   }};
   save();
@@ -1641,6 +1807,32 @@ function annotate() {{
 
   // Open popover to add comment
   openPopover(id);
+}}
+
+// ── Kind chips ──
+const ANNOTATION_KINDS = [
+  {{ key: 'highlight', label: 'Highlight' }},
+  {{ key: 'decision', label: 'Decision' }},
+  {{ key: 'bug', label: 'Bug' }},
+  {{ key: 'constraint', label: 'Constraint' }},
+  {{ key: 'todo', label: 'TODO' }},
+  {{ key: 'question', label: 'Question' }},
+  {{ key: 'insight', label: 'Insight' }},
+];
+
+function renderKindChips(selectedKind) {{
+  return ANNOTATION_KINDS.map(k =>
+    `<button class="kind-chip ${{k.key === selectedKind ? 'active' : ''}}" onclick="setKind('${{k.key}}')">${{k.label}}</button>`
+  ).join('');
+}}
+
+function setKind(kind) {{
+  if (!activeAnnotationId) return;
+  annotations[activeAnnotationId].kind = kind;
+  document.getElementById('kind-chips').innerHTML = renderKindChips(kind);
+  save();
+  const panel = document.getElementById('export-panel');
+  if (panel.classList.contains('visible')) buildExport();
 }}
 
 // ── Comment popover ──
@@ -1659,6 +1851,8 @@ function openPopover(id) {{
   const input = document.getElementById('comment-input');
 
   preview.textContent = '"' + (ann?.text || '').slice(0, 120) + '"';
+  document.getElementById('kind-chips').innerHTML = renderKindChips(ann?.kind || 'highlight');
+  document.getElementById('tags-input').value = (ann?.tags || []).join(', ');
   input.value = ann?.comment || '';
 
   // Position near the mark
@@ -1681,6 +1875,8 @@ function saveComment() {{
   if (!activeAnnotationId) return;
   const input = document.getElementById('comment-input');
   annotations[activeAnnotationId].comment = input.value;
+  const tagsStr = document.getElementById('tags-input').value;
+  annotations[activeAnnotationId].tags = tagsStr.split(',').map(t => t.trim()).filter(Boolean);
   save();
   closePopover();
   const panel = document.getElementById('export-panel');
@@ -1711,16 +1907,44 @@ function save() {{
 }}
 
 function restoreAnnotations() {{
-  // Re-create <mark> elements from stored annotations by finding their text in the DOM.
-  // Uses concatenated text across all text nodes to handle cross-element highlights.
+  // Migrate v1 → v2 schema (add defaults for missing fields)
+  let migrated = false;
+  for (const [id, ann] of Object.entries(annotations)) {{
+    if (ann.turnIndex === undefined) {{
+      ann.turnIndex = ann.turnId ? parseInt(ann.turnId.replace('turn-', ''), 10) : -1;
+      migrated = true;
+    }}
+    if (ann.blockIndex === undefined) {{ ann.blockIndex = 0; migrated = true; }}
+    if (ann.charStart === undefined) {{ ann.charStart = -1; migrated = true; }}
+    if (ann.charEnd === undefined) {{ ann.charEnd = -1; migrated = true; }}
+    if (ann.prefix === undefined) {{ ann.prefix = ''; migrated = true; }}
+    if (ann.suffix === undefined) {{ ann.suffix = ''; migrated = true; }}
+    if (ann.trigger === undefined) {{ ann.trigger = ''; migrated = true; }}
+    if (ann.kind === undefined) {{ ann.kind = 'highlight'; migrated = true; }}
+    if (ann.tags === undefined) {{ ann.tags = []; migrated = true; }}
+  }}
+  if (migrated) save();
+
+  // Re-create <mark> elements from stored annotations
   for (const [id, ann] of Object.entries(annotations)) {{
     if (document.querySelector(`mark[data-annotation-id="${{id}}"]`)) continue;
+    if (!ann.text) continue;
+
+    // Tier 1: Precise match using block index + char offsets
+    if (ann.charStart >= 0 && ann.turnId) {{
+      const turnEl = document.getElementById(ann.turnId);
+      if (turnEl) {{
+        const msgText = turnEl.querySelector(`.message-text[data-block-index="${{ann.blockIndex}}"]`);
+        if (msgText && wrapByOffset(msgText, ann.charStart, ann.charEnd, id)) continue;
+      }}
+    }}
+
+    // Tier 2/3: Text search in turn container (handles legacy + fuzzy)
     const container = ann.turnId
       ? document.getElementById(ann.turnId)
       : document.querySelector('.conversation');
-    if (!container || !ann.text) continue;
+    if (!container) continue;
 
-    // Build a map: collect all text nodes with their start offset in the concatenated string
     const textNodes = [];
     let totalLen = 0;
     const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
@@ -1730,15 +1954,11 @@ function restoreAnnotations() {{
       totalLen += node.textContent.length;
     }}
 
-    // Search in the concatenated text
     const fullText = textNodes.map(t => t.node.textContent).join('');
-    const searchText = ann.text;
-    const idx = fullText.indexOf(searchText);
+    const idx = fullText.indexOf(ann.text);
     if (idx === -1) continue;
 
-    const endIdx = idx + searchText.length;
-
-    // Find which text nodes overlap [idx, endIdx)
+    const endIdx = idx + ann.text.length;
     const nodesToWrap = [];
     for (const t of textNodes) {{
       const nodeStart = t.offset;
@@ -1749,7 +1969,6 @@ function restoreAnnotations() {{
       nodesToWrap.push({{ node: t.node, start: wrapStart, end: wrapEnd }});
     }}
 
-    // Wrap in reverse order to preserve offsets
     for (let i = nodesToWrap.length - 1; i >= 0; i--) {{
       const {{ node: tn, start: s, end: e }} = nodesToWrap[i];
       let target = tn;
@@ -1762,6 +1981,43 @@ function restoreAnnotations() {{
       mark.appendChild(target);
     }}
   }}
+}}
+
+function wrapByOffset(container, charStart, charEnd, id) {{
+  // Wrap text at precise character offsets within a container element
+  const textNodes = [];
+  let totalLen = 0;
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+  let node;
+  while ((node = walker.nextNode())) {{
+    textNodes.push({{ node, offset: totalLen, len: node.textContent.length }});
+    totalLen += node.textContent.length;
+  }}
+  if (charStart >= totalLen || charEnd > totalLen) return false;
+
+  const nodesToWrap = [];
+  for (const t of textNodes) {{
+    const nodeStart = t.offset;
+    const nodeEnd = t.offset + t.len;
+    if (nodeEnd <= charStart || nodeStart >= charEnd) continue;
+    const wrapStart = Math.max(charStart, nodeStart) - nodeStart;
+    const wrapEnd = Math.min(charEnd, nodeEnd) - nodeStart;
+    nodesToWrap.push({{ node: t.node, start: wrapStart, end: wrapEnd }});
+  }}
+  if (!nodesToWrap.length) return false;
+
+  for (let i = nodesToWrap.length - 1; i >= 0; i--) {{
+    const {{ node: tn, start: s, end: e }} = nodesToWrap[i];
+    let target = tn;
+    if (s > 0) target = tn.splitText(s);
+    if (e - s < target.textContent.length) target.splitText(e - s);
+    const mark = document.createElement('mark');
+    mark.setAttribute('data-annotation-id', id);
+    mark.onclick = () => openPopover(id);
+    target.parentNode.insertBefore(mark, target);
+    mark.appendChild(target);
+  }}
+  return true;
 }}
 
 function updateCount() {{
@@ -1810,10 +2066,13 @@ function buildExport() {{
     const quote = (ann.text || '').replace(/\\n/g, ' ').slice(0, 200);
     const comment = ann.comment ? `<div class="hl-item-comment">${{ann.comment}}</div>` : '';
     const time = ann.time ? `<span class="hl-item-time">${{ann.time}}</span>` : '';
+    const kindBadge = (ann.kind && ann.kind !== 'highlight') ? `<span class="hl-kind-badge">${{ann.kind}}</span>` : '';
+    const tagsHtml = (ann.tags && ann.tags.length) ? `<div class="hl-item-tags">${{ann.tags.map(t => `<span class="hl-tag">${{t}}</span>`).join('')}}</div>` : '';
     return `<div class="hl-item" onclick="scrollToHighlight('${{id}}')" onmouseenter="hoverHighlight('${{id}}',true)" onmouseleave="hoverHighlight('${{id}}',false)">
-      <div class="hl-item-header"><span class="hl-item-role">${{ann.role || '?'}}</span><span style="display:flex;align-items:center;gap:6px">${{time}}<button class="hl-delete" onclick="event.stopPropagation();removeAnnotation('${{id}}')" title="Delete highlight">&times;</button></span></div>
+      <div class="hl-item-header"><span class="hl-item-role">${{ann.role || '?'}}${{kindBadge}}</span><span style="display:flex;align-items:center;gap:6px">${{time}}<button class="hl-delete" onclick="event.stopPropagation();removeAnnotation('${{id}}')" title="Delete highlight">&times;</button></span></div>
       <div class="hl-item-text">${{quote}}</div>
       ${{comment}}
+      ${{tagsHtml}}
     </div>`;
   }}).join('');
 }}
@@ -1851,7 +2110,64 @@ function hoverHighlight(id, on) {{
 
 const JSONL_SOURCE = '{jsonl_path}';
 
-function copyExport() {{
+// ── Clipboard helper ──
+function copyToClipboard(text, btn) {{
+  navigator.clipboard.writeText(text);
+  if (btn) {{
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = orig, 1500);
+  }}
+}}
+
+function escXml(s) {{
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}}
+
+// ── Copy for Claude (XML context bundle) ──
+function copyXmlExport(btn) {{
+  const ids = sortedAnnotationIds();
+  if (!ids.length) return;
+
+  const source = JSONL_SOURCE.split('/').pop();
+  const date = new Date().toISOString().slice(0, 10);
+  const kindOrder = ['decision', 'constraint', 'bug', 'todo', 'question', 'insight', 'highlight'];
+
+  // Group by kind
+  const grouped = {{}};
+  ids.forEach(id => {{
+    const ann = annotations[id];
+    const k = ann.kind || 'highlight';
+    (grouped[k] = grouped[k] || []).push({{ id, ann }});
+  }});
+
+  let xml = `<context_bundle source="${{escXml(source)}}" date="${{date}}">\\n`;
+
+  kindOrder.forEach(kind => {{
+    if (!grouped[kind]) return;
+    grouped[kind].forEach(({{ id, ann }}) => {{
+      const turnIdx = ann.turnIndex ?? -1;
+      const speaker = ann.role || '?';
+      const quote = (ann.text || '').replace(/\\n/g, ' ').slice(0, 500);
+
+      xml += `  <highlight turn="${{turnIdx}}" speaker="${{speaker}}" kind="${{kind}}"`;
+      if (ann.tags && ann.tags.length) xml += ` tags="${{ann.tags.join(',')}}"`;
+      xml += `>\\n`;
+
+      const trigger = computeTrigger(ann);
+      if (trigger) xml += `    <trigger>${{escXml(trigger)}}</trigger>\\n`;
+      xml += `    <quote>${{escXml(quote)}}</quote>\\n`;
+      if (ann.comment) xml += `    <note>${{escXml(ann.comment)}}</note>\\n`;
+      xml += `  </highlight>\\n`;
+    }});
+  }});
+
+  xml += `</context_bundle>`;
+  copyToClipboard(xml, btn);
+}}
+
+// ── Copy Markdown ──
+function copyMarkdownExport(btn) {{
   const ids = sortedAnnotationIds();
   if (!ids.length) return;
 
@@ -1863,18 +2179,65 @@ function copyExport() {{
     const ann = annotations[id];
     const speaker = ann.role || '?';
     const time = ann.time ? `, ${{ann.time}}` : '';
-    const turnRef = ann.turnId ? ann.turnId.replace('turn-', '') : '?';
+    const turnRef = ann.turnIndex ?? (ann.turnId ? ann.turnId.replace('turn-', '') : '?');
+    const kindLabel = (ann.kind && ann.kind !== 'highlight') ? ` [${{ann.kind}}]` : '';
     const quote = ann.text.replace(/\\n/g, ' ').slice(0, 300);
-    out += `${{i + 1}}. [${{speaker}}${{time}}, turn #${{turnRef}}] "${{quote}}"\\n`;
+
+    out += `${{i + 1}}. [${{speaker}}${{time}}, turn #${{turnRef}}]${{kindLabel}} "${{quote}}"\\n`;
+
+    const trigger = computeTrigger(ann);
+    if (trigger) out += `   Context: ${{trigger}}\\n`;
     if (ann.comment) out += `   > ${{ann.comment}}\\n`;
+    if (ann.tags?.length) out += `   Tags: ${{ann.tags.join(', ')}}\\n`;
     out += `\\n`;
   }});
 
-  navigator.clipboard.writeText(out);
-  const btn = event.target;
-  const orig = btn.textContent;
-  btn.textContent = 'Copied!';
-  setTimeout(() => btn.textContent = orig, 1500);
+  copyToClipboard(out, btn);
+}}
+
+// ── Copy JSONL Slice (exchange windows) ──
+function copyJsonlSlice(btn) {{
+  const ids = sortedAnnotationIds();
+  if (!ids.length) return;
+
+  const turnIndices = new Set();
+  ids.forEach(id => {{
+    const ann = annotations[id];
+    const ti = ann.turnIndex ?? -1;
+    if (ti >= 0) {{
+      turnIndices.add(ti);
+      // Include exchange partner
+      if (ann.role === 'Claude' && ti > 0) turnIndices.add(ti - 1);
+      if (ann.role === 'You' && ti < convoData.length - 1) turnIndices.add(ti + 1);
+    }}
+  }});
+
+  const sorted = Array.from(turnIndices).sort((a, b) => a - b);
+  const lines = sorted.map(ti => {{
+    if (ti < convoData.length) {{
+      const turn = convoData[ti];
+      return JSON.stringify({{
+        role: turn.role,
+        timestamp: turn.timestamp,
+        text: turn.text.join('\\n\\n')
+      }});
+    }}
+    return null;
+  }}).filter(Boolean);
+
+  copyToClipboard(lines.join('\\n'), btn);
+}}
+
+// ── Download annotations JSON (for bake-in) ──
+function downloadAnnotations() {{
+  const data = JSON.stringify(annotations, null, 2);
+  const blob = new Blob([data], {{ type: 'application/json' }});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '{session_id}.annotations.json';
+  a.click();
+  URL.revokeObjectURL(url);
 }}
 </script>
 </body>
@@ -1893,11 +2256,21 @@ def convert_jsonl_to_html(
 
     if not input_path.exists():
         print(f"Error: File not found: {input_file}")
-        return
+        return None
 
-    output_path = Path(output_file) if output_file else input_path.with_suffix(".html")
-
+    # Parse first so we have session_id for default output path
     convo = build_conversation(input_file)
+
+    # Determine output path
+    if output_file:
+        output_path = Path(output_file)
+    elif convo["session_id"]:
+        viewer_dir = Path.home() / ".claude" / "viewer"
+        viewer_dir.mkdir(parents=True, exist_ok=True)
+        short_id = convo["session_id"][:8]
+        output_path = viewer_dir / f"{short_id}.html"
+    else:
+        output_path = input_path.with_suffix(".html")
 
     # Render turns
     turns_html = []
@@ -1950,6 +2323,41 @@ def convert_jsonl_to_html(
     toc_html = "\n".join(toc_items)
 
     session_id = convo["session_id"] or input_path.stem
+
+    # Build metadata comment for index page parsing
+    meta_json = json.dumps({
+        "session_id": session_id,
+        "short_id": session_id[:8],
+        "project_dir": convo["project_dir"] or "",
+        "model": convo["model"] or "",
+        "start_time": convo["start_time"] or "",
+        "turn_count": turn_count,
+        "user_turns": user_turns,
+    })
+    meta_comment = f"<!-- CONVO_META:{meta_json} -->"
+
+    # Build lightweight conversation data for JS (text blocks only)
+    convo_data = []
+    for turn in convo["turns"]:
+        text_blocks = [b["text"] for b in turn["blocks"] if b["type"] == "text"]
+        convo_data.append({
+            "role": turn["role"],
+            "timestamp": turn.get("timestamp", ""),
+            "text": text_blocks,
+        })
+    conversation_data_json = json.dumps(convo_data, ensure_ascii=False)
+
+    # Load baked annotations from sidecar file if it exists
+    viewer_dir = Path.home() / ".claude" / "viewer"
+    sidecar_path = viewer_dir / f"{session_id}.annotations.json"
+    baked_annotations_json = "{}"
+    if sidecar_path.exists():
+        try:
+            baked_data = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            baked_annotations_json = json.dumps(baked_data, ensure_ascii=False)
+        except (json.JSONDecodeError, OSError):
+            pass
+
     html_out = HTML_TEMPLATE.format(
         title=escape(title),
         meta_html="\n    ".join(meta_parts),
@@ -1957,14 +2365,246 @@ def convert_jsonl_to_html(
         toc_html=toc_html,
         session_id=session_id,
         jsonl_path=str(input_path.resolve()),
+        meta_comment=meta_comment,
     )
+
+    # Inject JSON data via replace (avoids f-string brace escaping issues)
+    # Escape </script> and </Script> etc. to prevent premature script block closure
+    # (conversation text may discuss HTML script tags)
+    def safe_for_script(s: str) -> str:
+        return s.replace("</", "<\\/")
+
+    html_out = html_out.replace("\x00CONVO_DATA\x00", safe_for_script(conversation_data_json))
+    html_out = html_out.replace("\x00BAKED_ANNOTATIONS\x00", safe_for_script(baked_annotations_json))
 
     output_path.write_text(html_out, encoding="utf-8")
     size_kb = output_path.stat().st_size / 1024
     print(
-        f"{input_path.name} -> {output_path.name} "
+        f"{input_path.name} -> {output_path} "
         f"({turn_count} turns, {size_kb:.0f} KB)"
     )
+
+    # Update index if outputting to viewer directory
+    viewer_dir = Path.home() / ".claude" / "viewer"
+    if output_path.parent.resolve() == viewer_dir.resolve():
+        update_index(viewer_dir)
+
+    return output_path
+
+
+# ── Index page ──
+
+INDEX_TEMPLATE = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Conversations</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {{
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #21262d;
+    --text: #e6edf3;
+    --text2: #7d8590;
+    --border: #30363d;
+    --accent: #da7756;
+  }}
+  @media (prefers-color-scheme: light) {{
+    :root {{
+      --bg: #f6f8fa;
+      --surface: #ffffff;
+      --surface2: #f0f2f5;
+      --text: #1f2328;
+      --text2: #656d76;
+      --border: #d0d7de;
+      --accent: #c2613a;
+    }}
+  }}
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    padding: 40px 24px;
+    max-width: 960px;
+    margin: 0 auto;
+  }}
+  h1 {{
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }}
+  .meta {{
+    color: var(--text2);
+    font-size: 0.82rem;
+    margin-bottom: 24px;
+  }}
+  .index-list {{
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    background: var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }}
+  .index-entry {{
+    display: grid;
+    grid-template-columns: 80px 1fr 140px 160px 90px;
+    gap: 12px;
+    align-items: center;
+    padding: 12px 16px;
+    background: var(--surface);
+    text-decoration: none;
+    color: inherit;
+    transition: background 0.15s;
+  }}
+  .index-entry:hover {{
+    background: var(--surface2);
+  }}
+  .entry-id {{
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.82rem;
+    color: var(--accent);
+    font-weight: 500;
+  }}
+  .entry-project {{
+    font-size: 0.85rem;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }}
+  .entry-model {{
+    font-size: 0.8rem;
+    color: var(--text2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }}
+  .entry-time {{
+    font-size: 0.8rem;
+    color: var(--text2);
+    white-space: nowrap;
+  }}
+  .entry-turns {{
+    font-size: 0.8rem;
+    color: var(--text2);
+    text-align: right;
+    white-space: nowrap;
+  }}
+  .empty {{
+    text-align: center;
+    padding: 40px;
+    color: var(--text2);
+    background: var(--surface);
+    border-radius: 8px;
+  }}
+  @media (max-width: 700px) {{
+    .index-entry {{
+      grid-template-columns: 70px 1fr 80px;
+    }}
+    .entry-model, .entry-time {{
+      display: none;
+    }}
+  }}
+</style>
+</head>
+<body>
+  <h1>Claude Conversations</h1>
+  <div class="meta">{count} sessions</div>
+  {entries_html}
+</body>
+</html>
+"""
+
+
+def _shorten_model(model: str) -> str:
+    """Shorten model name for display."""
+    if not model:
+        return ""
+    # claude-3-5-sonnet-20241022 -> sonnet-3.5
+    # claude-opus-4-20250514 -> opus-4
+    parts = model.lower()
+    for prefix in ("claude-", "anthropic/"):
+        if parts.startswith(prefix):
+            parts = parts[len(prefix):]
+    # Strip date suffix
+    parts = re.sub(r"-\d{8}$", "", parts)
+    return parts
+
+
+def _format_index_time(start_time: str) -> str:
+    """Format ISO timestamp for index display."""
+    if not start_time:
+        return ""
+    try:
+        dt = datetime.fromisoformat(start_time.replace("Z", "+00:00")).astimezone()
+        return dt.strftime("%b %d, %Y %I:%M %p")
+    except Exception:
+        return start_time[:16]
+
+
+def update_index(viewer_dir: Path):
+    """Regenerate the index.html catalog of all rendered sessions."""
+    meta_pattern = re.compile(r"<!-- CONVO_META:(\{.*?\}) -->")
+    entries = []
+
+    for html_file in sorted(viewer_dir.glob("*.html")):
+        if html_file.name == "index.html":
+            continue
+        try:
+            head = html_file.read_text(encoding="utf-8")[:1000]
+            match = meta_pattern.search(head)
+            if match:
+                meta = json.loads(match.group(1))
+                meta["_filename"] = html_file.name
+                entries.append(meta)
+        except Exception:
+            continue
+
+    # Sort by start_time descending (most recent first)
+    entries.sort(key=lambda e: e.get("start_time", ""), reverse=True)
+
+    if entries:
+        rows = []
+        for meta in entries:
+            short_id = escape(meta.get("short_id", meta.get("_filename", "?")))
+            project = meta.get("project_dir", "")
+            if project:
+                parts = project.rstrip("/").split("/")
+                project_display = "/".join(parts[-2:]) if len(parts) >= 2 else project
+            else:
+                project_display = ""
+            model_display = _shorten_model(meta.get("model", ""))
+            time_display = _format_index_time(meta.get("start_time", ""))
+            turn_count = meta.get("turn_count", 0)
+            user_turns = meta.get("user_turns", 0)
+            filename = meta["_filename"]
+
+            rows.append(
+                f'<a class="index-entry" href="{filename}">'
+                f'<span class="entry-id">{short_id}</span>'
+                f'<span class="entry-project" title="{escape(project)}">{escape(project_display)}</span>'
+                f'<span class="entry-model">{escape(model_display)}</span>'
+                f'<span class="entry-time">{time_display}</span>'
+                f'<span class="entry-turns">{turn_count} turns ({user_turns} user)</span>'
+                f"</a>"
+            )
+        entries_html = '<div class="index-list">\n' + "\n".join(rows) + "\n</div>"
+    else:
+        entries_html = '<div class="empty">No conversations rendered yet.</div>'
+
+    index_html = INDEX_TEMPLATE.format(
+        count=len(entries),
+        entries_html=entries_html,
+    )
+    (viewer_dir / "index.html").write_text(index_html, encoding="utf-8")
 
 
 def main():
