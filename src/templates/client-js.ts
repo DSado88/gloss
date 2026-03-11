@@ -41,6 +41,7 @@ const bakedAnnotations = JSON.parse(document.getElementById('baked-annotations')
 const storedAnnotations = JSON.parse(localStorage.getItem('annotations_${sessionId}') || '{}');
 const annotations = Object.assign({}, bakedAnnotations, storedAnnotations);
 let activeAnnotationId = null;
+let savedRange = null;
 
 // Restore saved annotations on load
 document.addEventListener('DOMContentLoaded', () => {
@@ -63,8 +64,12 @@ function genId() {
 
 function onSelectionChange() {
   const sel = window.getSelection();
+  const hasSelection = sel && !sel.isCollapsed && sel.toString().trim();
   const btn = document.getElementById('btn-highlight');
-  btn.disabled = !sel || sel.isCollapsed || !sel.toString().trim();
+  btn.disabled = !hasSelection;
+  if (hasSelection) {
+    savedRange = sel.getRangeAt(0).cloneRange();
+  }
 }
 
 // ── Walk text nodes in a range and wrap each in <mark> ──
@@ -140,15 +145,22 @@ function computeTrigger(ann) {
 
 // ── Highlight selected text ──
 function annotate() {
+  // Use saved range (survives button click clearing the selection)
   const sel = window.getSelection();
-  if (!sel || sel.isCollapsed || !sel.toString().trim()) return;
+  let range;
+  if (sel && !sel.isCollapsed && sel.toString().trim()) {
+    range = sel.getRangeAt(0);
+  } else if (savedRange) {
+    range = savedRange;
+  } else {
+    return;
+  }
 
-  const range = sel.getRangeAt(0);
   const convo = document.querySelector('.conversation');
   if (!convo.contains(range.commonAncestorContainer)) return;
 
   const id = genId();
-  const text = sel.toString().trim();
+  const text = range.toString().trim();
 
   // Find the turn context
   const turnEl = range.startContainer.parentElement?.closest('.turn');
@@ -209,7 +221,8 @@ function annotate() {
   // Wrap all text nodes in the range
   wrapTextNodes(range, id);
 
-  sel.removeAllRanges();
+  savedRange = null;
+  if (sel) sel.removeAllRanges();
 
   // Store annotation
   annotations[id] = {
