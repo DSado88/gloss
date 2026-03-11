@@ -1134,6 +1134,10 @@ HTML_TEMPLATE = """\
   body.hide-tools .tool-use,
   body.hide-tools .tool-result {{ display: none; }}
   body.hide-thinking .thinking {{ display: none; }}
+  body.hide-tagging .kind-chips,
+  body.hide-tagging .tags-row,
+  body.hide-tagging .hl-kind-badge,
+  body.hide-tagging .hl-item-tags {{ display: none; }}
 
   /* ── TOC Sidebar ── */
   .toc-panel {{
@@ -1504,7 +1508,7 @@ HTML_TEMPLATE = """\
   .export-panel-footer button.primary:hover {{ background: var(--accent-hover); }}
 </style>
 </head>
-<body class="hide-tools hide-thinking">
+<body class="hide-tools hide-thinking hide-tagging">
 <div class="header">
   <h1>{title}</h1>
   <div class="meta">
@@ -1516,6 +1520,7 @@ HTML_TEMPLATE = """\
   <span style="border-left: 1px solid var(--border); height: 16px;"></span>
   <label><input type="checkbox" id="toggle-tools" onchange="document.body.classList.toggle('hide-tools', !this.checked)"> Show tools</label>
   <label><input type="checkbox" id="toggle-thinking" onchange="document.body.classList.toggle('hide-thinking', !this.checked)"> Show thinking</label>
+  <label><input type="checkbox" id="toggle-tagging" onchange="document.body.classList.toggle('hide-tagging', !this.checked)"> Tags &amp; kinds</label>
   <span style="border-left: 1px solid var(--border); height: 16px;"></span>
   <div class="annotation-bar">
     <button id="btn-highlight" onclick="annotate()" disabled title="Select text first, then click to annotate (Mod+Shift+H)">Highlight</button>
