@@ -55,14 +55,14 @@ export function renderMdTable(lines: string[]): string {
 
   const parts: string[] = ["<table>"];
   parts.push("<thead><tr>");
-  for (const h of headers) parts.push(`<th>${h}</th>`);
+  for (const h of headers) parts.push(`<th>${applyInlineFormatting(escape(h))}</th>`);
   parts.push("</tr></thead>");
 
   parts.push("<tbody>");
   for (const rowLine of lines.slice(2)) {
     const cells = parseRow(rowLine);
     parts.push("<tr>");
-    for (const cell of cells) parts.push(`<td>${cell}</td>`);
+    for (const cell of cells) parts.push(`<td>${applyInlineFormatting(escape(cell))}</td>`);
     parts.push("</tr>");
   }
   parts.push("</tbody></table>");
@@ -233,5 +233,13 @@ export function renderMarkdownInline(text: string): string {
     processed.push(partPieces.join(""));
   }
 
-  return processed.join("");
+  let result = processed.join("");
+
+  // Sanitize HTML tags that would break page structure if they leak through.
+  // Tool results can contain escaped HTML that partially decodes through the
+  // markdown pipeline, producing real <title>, <script>, etc. elements.
+  result = result.replace(/<(\/?)(title|script|style|iframe|object|embed|base)([\s>])/gi,
+    (_, slash, tag, after) => `&lt;${slash}${tag}${after === ">" ? "&gt;" : after}`);
+
+  return result;
 }

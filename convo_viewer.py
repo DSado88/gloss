@@ -89,7 +89,7 @@ def _render_md_table(lines: list[str]) -> str:
     # Header
     html_parts.append("<thead><tr>")
     for h in headers:
-        html_parts.append(f"<th>{h}</th>")
+        html_parts.append(f"<th>{escape(h)}</th>")
     html_parts.append("</tr></thead>")
     # Body
     html_parts.append("<tbody>")
@@ -97,7 +97,7 @@ def _render_md_table(lines: list[str]) -> str:
         cells = parse_row(row_line)
         html_parts.append("<tr>")
         for cell in cells:
-            html_parts.append(f"<td>{cell}</td>")
+            html_parts.append(f"<td>{escape(cell)}</td>")
         html_parts.append("</tr>")
     html_parts.append("</tbody></table>")
     return "".join(html_parts)

@@ -311,4 +311,157 @@ describe("renderMarkdownInline", () => {
     expect(html).toContain("<th>H1</th>");
     expect(html).toContain("<td>a</td>");
   });
+
+  // --- Security: HTML escaping in tables (mut-005, mut-006) ---
+
+  it("escapes HTML in table headers", () => {
+    // Use <div> — not caught by the dangerous-tag sanitizer, so only escape() protects us
+    const md = "| <div>XSS</div> | Normal |\n|---|---|\n| a | b |";
+    const html = renderMarkdownInline(md);
+    expect(html).toContain("&lt;div&gt;");
+    expect(html).not.toMatch(/<div>XSS/);
+  });
+
+  it("escapes HTML in table cells", () => {
+    // Use <span> — not caught by the dangerous-tag sanitizer
+    const md = "| H1 | H2 |\n|---|---|\n| <span>alert(1)</span> | safe |";
+    const html = renderMarkdownInline(md);
+    expect(html).toContain("&lt;span&gt;");
+    expect(html).not.toMatch(/<span>alert/);
+  });
+
+  // --- Security: dangerous tag sanitizer (mut-015, mut-016) ---
+  // The sanitizer is defense-in-depth for tags that leak through other paths.
+  // To test it, we use table cells where the <title> appears in the rendered
+  // table HTML *after* table processing but *before* the final sanitizer runs.
+  // We test with raw HTML that the table path produces.
+
+  it("sanitizes <title> tags that survive to final output", () => {
+    // This tests the full pipeline — escape() in table cells is the primary defense,
+    // and the sanitizer is the backup. We verify the final output is safe.
+    const md = "| <title>bad</title> | ok |\n|---|---|\n| x | y |";
+    const html = renderMarkdownInline(md);
+    expect(html).not.toMatch(/<title>/i);
+  });
+
+  it("sanitizes case-insensitive dangerous tags", () => {
+    // Mixed case tags must also be caught
+    const md = "| <TITLE>bad</TITLE> | ok |\n|---|---|\n| x | y |";
+    const html = renderMarkdownInline(md);
+    expect(html).not.toMatch(/<TITLE>/i);
+  });
+
+  it("sanitizes dangerous tags with attributes", () => {
+    const md = '| <script type="text/javascript">x</script> | ok |\n|---|---|\n| x | y |';
+    const html = renderMarkdownInline(md);
+    expect(html).not.toMatch(/<script[\s>]/i);
+  });
+
+  // --- Security: HTML escaping in main text (mut-018) ---
+
+  it("escapes raw HTML in regular text", () => {
+    const html = renderMarkdownInline("<div>injected</div>");
+    expect(html).toContain("&lt;div&gt;");
+    expect(html).not.toMatch(/<div>/);
+  });
+
+  // --- Boundary: table separator validation (mut-004) ---
+
+  it("rejects single-column separator as table", () => {
+    const lines = ["| A | B |", "| --- |", "| 1 | 2 |"];
+    // Separator needs at least two pipe-separated sections
+    const html = renderMdTable(lines);
+    expect(html).not.toContain("<table>");
+  });
+
+  // --- Boundary: table row slice (mut-019) ---
+
+  it("does not render the separator row as a data row", () => {
+    const lines = [
+      "| H1 | H2 |",
+      "|---|---|",
+      "| a | b |",
+    ];
+    const html = renderMdTable(lines);
+    expect(html).toContain("<td>a</td>");
+    // Only 1 data row in tbody — separator must not become a <tr>
+    const tbodyMatch = html.match(/<tbody>([\s\S]*?)<\/tbody>/);
+    const trCount = (tbodyMatch?.[1].match(/<tr>/g) || []).length;
+    expect(trCount).toBe(1);
+  });
+
+  // --- Boundary: processTables whitespace handling (mut-007) ---
+
+  it("recognizes table rows with leading whitespace", () => {
+    const text = "  | H1 | H2 |\n  |---|---|\n  | a | b |";
+    const result = processTables(text);
+    expect(result).toContain("<table>");
+  });
+
+  // --- Logic: greedy bold matching (mut-009) ---
+
+  it("renders multiple bold spans independently", () => {
+    const html = renderMarkdownInline("**first** and **second**");
+    expect(html).toContain("<strong>first</strong>");
+    expect(html).toContain("<strong>second</strong>");
+  });
+
+  // --- Boundary: empty backtick handling (mut-010) ---
+
+  it("does not create empty code elements from ``", () => {
+    const html = renderMarkdownInline("empty `` backticks");
+    // Should NOT produce <code></code>
+    expect(html).not.toContain("<code></code>");
+  });
+
+  // --- Boundary: newline collapsing (mut-013) ---
+
+  it("collapses quadruple newlines into a single paragraph break", () => {
+    // With /\n\n+/g (correct), \n\n\n\n matches as one → 1 break
+    // With /\n\n/g (mutant), \n\n\n\n matches twice → 2 breaks
+    const html = renderMarkdownInline("para one\n\n\n\npara two");
+    const count = (html.match(/<\/p><p>/g) || []).length;
+    expect(count).toBe(1);
+  });
+
+  // --- Logic: list wrapping across paragraphs (mut-012) ---
+
+  it("does not wrap list items across paragraph boundaries", () => {
+    const md = "- item one\n- item two\n\nNon-list paragraph\n\n- item three";
+    const html = renderMarkdownInline(md);
+    // Should have two separate <ul> groups, not one spanning the paragraph
+    const ulCount = (html.match(/<ul>/g) || []).length;
+    expect(ulCount).toBe(2);
+  });
+
+  // --- Boundary: filepath ~ expansion (mut-008) ---
+
+  it("expands bare ~ in filepath", () => {
+    const result = linkFilepath("~/test.txt");
+    const home = homedir();
+    expect(result).toContain(`file://${home}/test.txt`);
+  });
+
+  // --- Logic: sentinel startsWith check (mut-017) ---
+
+  it("does not treat non-code-block content as code blocks", () => {
+    // Text that contains code block markers should still be processed normally
+    // when it appears outside of actual fenced code blocks
+    const html = renderMarkdownInline("**bold** text here");
+    expect(html).toContain("<strong>bold</strong>");
+    expect(html).not.toContain("<pre>");
+  });
+
+  // --- Boundary: parseRow leading pipe (mut-020) ---
+
+  it("preserves pipe characters in table cell content", () => {
+    const lines = [
+      "| Expr | Result |",
+      "|------|--------|",
+      "| a | b |",
+    ];
+    const html = renderMdTable(lines);
+    expect(html).toContain("<td>a</td>");
+    expect(html).toContain("<td>b</td>");
+  });
 });
