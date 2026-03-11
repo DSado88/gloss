@@ -1631,11 +1631,19 @@ document.addEventListener('DOMContentLoaded', () => {{
   document.addEventListener('selectionchange', onSelectionChange);
 }});
 
-// Keyboard shortcut: Cmd/Ctrl+Shift+H
+// Keyboard shortcut: 'h' when text is selected, or Cmd/Ctrl+Shift+H
 document.addEventListener('keydown', (e) => {{
   if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'h') {{
     e.preventDefault();
     annotate();
+    return;
+  }}
+  if (e.key.toLowerCase() === 'h' && !e.metaKey && !e.ctrlKey && !e.altKey) {{
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.toString().trim()) {{
+      e.preventDefault();
+      annotate();
+    }}
   }}
 }});
 
