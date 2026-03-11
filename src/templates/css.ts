@@ -30,7 +30,7 @@ export const CSS_STYLES = `
   }
 
   @media (prefers-color-scheme: light) {
-    :root {
+    html:not([data-theme="dark"]) {
       --bg: #f7f7f8;
       --surface: #ffffff;
       --surface2: #ececef;
@@ -59,6 +59,37 @@ export const CSS_STYLES = `
       --tab-bg: rgba(0, 0, 0, 0.04);
       --tab-hover: rgba(0, 0, 0, 0.07);
     }
+  }
+
+  /* Manual light mode override */
+  html[data-theme="light"] {
+    --bg: #f7f7f8;
+    --surface: #ffffff;
+    --surface2: #ececef;
+    --border: #e0e0e4;
+    --border-subtle: #ececef;
+    --text: #111111;
+    --text-muted: #555555;
+    --text-tertiary: #888888;
+    --user-bg: rgba(13, 148, 136, 0.06);
+    --user-border: #0d9488;
+    --user-label: #0f766e;
+    --assistant-bg: rgba(218, 119, 86, 0.06);
+    --assistant-border: #da7756;
+    --assistant-label: #c4633e;
+    --code-bg: #f0f0f3;
+    --tool-bg: rgba(22, 163, 74, 0.05);
+    --tool-border: #e0e0e4;
+    --result-bg: rgba(37, 99, 235, 0.04);
+    --result-border: #e0e0e4;
+    --error-border: #dc2626;
+    --error-bg: rgba(220, 38, 38, 0.06);
+    --accent: #4f46e5;
+    --accent-hover: #4338ca;
+    --accent-subtle: rgba(79, 70, 229, 0.08);
+    --thinking-bg: #f5f5f7;
+    --tab-bg: rgba(0, 0, 0, 0.04);
+    --tab-hover: rgba(0, 0, 0, 0.07);
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -133,6 +164,19 @@ export const CSS_STYLES = `
     transition: all 0.1s ease;
   }
   .toc-toggle:hover { background: var(--tab-hover); color: var(--text); }
+
+  #theme-toggle {
+    background: var(--tab-bg);
+    border: none;
+    color: var(--text-muted);
+    padding: 5px 8px;
+    border-radius: 6px;
+    font-size: 15px;
+    cursor: pointer;
+    transition: all 0.1s ease;
+    line-height: 1;
+  }
+  #theme-toggle:hover { background: var(--tab-hover); color: var(--text); }
 
   .conversation {
     max-width: 100%;

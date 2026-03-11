@@ -9,6 +9,40 @@
  */
 export function buildClientJs(sessionId: string, jsonlPath: string): string {
   return `
+// ── Theme toggle ──
+function cycleTheme() {
+  const html = document.documentElement;
+  const current = html.getAttribute('data-theme') || 'auto';
+  const next = current === 'auto' ? 'light' : current === 'light' ? 'dark' : 'auto';
+  const btn = document.getElementById('theme-toggle');
+  if (next === 'auto') {
+    html.removeAttribute('data-theme');
+    btn.textContent = '\\u263E';
+    btn.title = 'Theme: auto (system)';
+  } else if (next === 'light') {
+    html.setAttribute('data-theme', 'light');
+    btn.textContent = '\\u2600';
+    btn.title = 'Theme: light';
+  } else {
+    html.setAttribute('data-theme', 'dark');
+    btn.textContent = '\\u263E';
+    btn.title = 'Theme: dark';
+  }
+  localStorage.setItem('convo-viewer-theme', next);
+}
+// Restore saved theme
+(function() {
+  const saved = localStorage.getItem('convo-viewer-theme');
+  if (saved && saved !== 'auto') {
+    document.documentElement.setAttribute('data-theme', saved);
+    const btn = document.getElementById('theme-toggle');
+    if (btn) {
+      btn.textContent = saved === 'light' ? '\\u2600' : '\\u263E';
+      btn.title = 'Theme: ' + saved;
+    }
+  }
+})();
+
 // ── TOC ──
 function toggleToc() {
   document.getElementById('toc-panel').classList.toggle('visible');

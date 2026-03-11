@@ -49,6 +49,7 @@ ${CSS_STYLES}
   <label><input type="checkbox" id="toggle-thinking" onchange="document.body.classList.toggle('hide-thinking', !this.checked)"> Show thinking</label>
   <label><input type="checkbox" id="toggle-tagging" onchange="document.body.classList.toggle('hide-tagging', !this.checked)"> Tags &amp; kinds</label>
   <span style="border-left: 1px solid var(--border); height: 16px;"></span>
+  <button id="theme-toggle" onclick="cycleTheme()" title="Toggle dark/light mode">&#9790;</button>
   <div class="annotation-bar">
     <button id="btn-highlight" onclick="annotate()" disabled title="Select text first, then click to annotate (Mod+Shift+H)">Highlight</button>
     <button id="btn-export" onclick="toggleExport()">Highlights</button>

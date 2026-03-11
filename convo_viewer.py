@@ -657,7 +657,7 @@ HTML_TEMPLATE = """\
   }}
 
   @media (prefers-color-scheme: light) {{
-    :root {{
+    html:not([data-theme="dark"]) {{
       --bg: #f7f7f8;
       --surface: #ffffff;
       --surface2: #ececef;
@@ -686,6 +686,37 @@ HTML_TEMPLATE = """\
       --tab-bg: rgba(0, 0, 0, 0.04);
       --tab-hover: rgba(0, 0, 0, 0.07);
     }}
+  }}
+
+  /* Manual light mode override */
+  html[data-theme="light"] {{
+    --bg: #f7f7f8;
+    --surface: #ffffff;
+    --surface2: #ececef;
+    --border: #e0e0e4;
+    --border-subtle: #ececef;
+    --text: #111111;
+    --text-muted: #555555;
+    --text-tertiary: #888888;
+    --user-bg: rgba(13, 148, 136, 0.06);
+    --user-border: #0d9488;
+    --user-label: #0f766e;
+    --assistant-bg: rgba(218, 119, 86, 0.06);
+    --assistant-border: #da7756;
+    --assistant-label: #c4633e;
+    --code-bg: #f0f0f3;
+    --tool-bg: rgba(22, 163, 74, 0.05);
+    --tool-border: #e0e0e4;
+    --result-bg: rgba(37, 99, 235, 0.04);
+    --result-border: #e0e0e4;
+    --error-border: #dc2626;
+    --error-bg: rgba(220, 38, 38, 0.06);
+    --accent: #4f46e5;
+    --accent-hover: #4338ca;
+    --accent-subtle: rgba(79, 70, 229, 0.08);
+    --thinking-bg: #f5f5f7;
+    --tab-bg: rgba(0, 0, 0, 0.04);
+    --tab-hover: rgba(0, 0, 0, 0.07);
   }}
 
   * {{ margin: 0; padding: 0; box-sizing: border-box; }}
@@ -760,6 +791,19 @@ HTML_TEMPLATE = """\
     transition: all 0.1s ease;
   }}
   .toc-toggle:hover {{ background: var(--tab-hover); color: var(--text); }}
+
+  #theme-toggle {{
+    background: var(--tab-bg);
+    border: none;
+    color: var(--text-muted);
+    padding: 5px 8px;
+    border-radius: 6px;
+    font-size: 15px;
+    cursor: pointer;
+    transition: all 0.1s ease;
+    line-height: 1;
+  }}
+  #theme-toggle:hover {{ background: var(--tab-hover); color: var(--text); }}
 
   .conversation {{
     max-width: 100%;
@@ -1529,6 +1573,8 @@ HTML_TEMPLATE = """\
   <label><input type="checkbox" id="toggle-thinking" onchange="document.body.classList.toggle('hide-thinking', !this.checked)"> Show thinking</label>
   <label><input type="checkbox" id="toggle-tagging" onchange="document.body.classList.toggle('hide-tagging', !this.checked)"> Tags &amp; kinds</label>
   <span style="border-left: 1px solid var(--border); height: 16px;"></span>
+  <button id="theme-toggle" onclick="cycleTheme()" title="Toggle dark/light mode">&#9790;</button>
+  <span style="border-left: 1px solid var(--border); height: 16px;"></span>
   <div class="annotation-bar">
     <button id="btn-highlight" onclick="annotate()" disabled title="Select text first, then click to annotate (Mod+Shift+H)">Highlight</button>
     <button id="btn-export" onclick="toggleExport()">Highlights</button>
@@ -1590,6 +1636,40 @@ HTML_TEMPLATE = """\
 <script type="application/json" id="baked-annotations">\x00BAKED_ANNOTATIONS\x00</script>
 
 <script>
+// ── Theme toggle ──
+function cycleTheme() {{
+  const html = document.documentElement;
+  const current = html.getAttribute('data-theme') || 'auto';
+  const next = current === 'auto' ? 'light' : current === 'light' ? 'dark' : 'auto';
+  const btn = document.getElementById('theme-toggle');
+  if (next === 'auto') {{
+    html.removeAttribute('data-theme');
+    btn.textContent = '\u263E';
+    btn.title = 'Theme: auto (system)';
+  }} else if (next === 'light') {{
+    html.setAttribute('data-theme', 'light');
+    btn.textContent = '\u2600';
+    btn.title = 'Theme: light';
+  }} else {{
+    html.setAttribute('data-theme', 'dark');
+    btn.textContent = '\u263E';
+    btn.title = 'Theme: dark';
+  }}
+  localStorage.setItem('convo-viewer-theme', next);
+}}
+// Restore saved theme
+(function() {{
+  const saved = localStorage.getItem('convo-viewer-theme');
+  if (saved && saved !== 'auto') {{
+    document.documentElement.setAttribute('data-theme', saved);
+    const btn = document.getElementById('theme-toggle');
+    if (btn) {{
+      btn.textContent = saved === 'light' ? '\u2600' : '\u263E';
+      btn.title = 'Theme: ' + saved;
+    }}
+  }}
+}})();
+
 // ── TOC ──
 function toggleToc() {{
   document.getElementById('toc-panel').classList.toggle('visible');
