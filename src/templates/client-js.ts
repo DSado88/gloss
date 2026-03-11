@@ -43,6 +43,14 @@ function cycleTheme() {
   }
 })();
 
+// ── Close settings dropdown on outside click ──
+document.addEventListener('click', (e) => {
+  const menu = document.querySelector('.settings-menu');
+  if (menu && menu.classList.contains('open') && !menu.contains(e.target)) {
+    menu.classList.remove('open');
+  }
+});
+
 // ── TOC ──
 function toggleToc() {
   document.getElementById('toc-panel').classList.toggle('visible');

@@ -108,7 +108,12 @@ export const CSS_STYLES = `
     background: var(--surface);
     border-bottom: 1px solid var(--border);
     padding: 20px 24px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
   }
+
+  .header-left { flex: 1; min-width: 0; }
 
   .header h1 {
     font-size: 18px;
@@ -125,18 +130,36 @@ export const CSS_STYLES = `
     flex-wrap: wrap;
   }
 
+  #theme-toggle {
+    background: var(--tab-bg);
+    border: none;
+    color: var(--text-muted);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.1s ease;
+    line-height: 1;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  #theme-toggle:hover { background: var(--tab-hover); color: var(--text); }
+
   .controls {
     background: var(--surface);
     border-bottom: 1px solid var(--border);
     padding: 8px 24px;
     display: flex;
-    gap: 12px;
+    justify-content: space-between;
     font-size: 13px;
     position: sticky;
     top: 0;
     z-index: 99;
     align-items: center;
   }
+
+  .controls-left { display: flex; align-items: center; gap: 12px; }
+  .controls-right { display: flex; align-items: center; gap: 10px; }
 
   .controls label {
     cursor: pointer;
@@ -165,18 +188,42 @@ export const CSS_STYLES = `
   }
   .toc-toggle:hover { background: var(--tab-hover); color: var(--text); }
 
-  #theme-toggle {
+  /* Settings dropdown */
+  .settings-menu { position: relative; }
+  .settings-toggle {
     background: var(--tab-bg);
     border: none;
     color: var(--text-muted);
-    padding: 5px 8px;
+    padding: 5px 10px;
     border-radius: 6px;
     font-size: 15px;
     cursor: pointer;
     transition: all 0.1s ease;
     line-height: 1;
   }
-  #theme-toggle:hover { background: var(--tab-hover); color: var(--text); }
+  .settings-toggle:hover { background: var(--tab-hover); color: var(--text); }
+  .settings-dropdown {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 200;
+    white-space: nowrap;
+  }
+  .settings-menu.open .settings-dropdown { display: flex; flex-direction: column; gap: 6px; }
+  .settings-dropdown label {
+    cursor: pointer;
+    color: var(--text-muted);
+    user-select: none;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 2px 0;
+  }
 
   .conversation {
     max-width: 100%;
@@ -673,13 +720,7 @@ export const CSS_STYLES = `
     background: rgba(94, 106, 210, 0.25);
   }
 
-  .annotation-bar {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-  }
-
-  .annotation-bar button {
+  .controls-right > button {
     background: var(--tab-bg);
     border: none;
     color: var(--text-muted);
@@ -692,9 +733,9 @@ export const CSS_STYLES = `
     font-family: inherit;
     transition: all 0.1s ease;
   }
-  .annotation-bar button:hover { background: var(--tab-hover); color: var(--text); }
-  .annotation-bar button:disabled { opacity: 0.3; cursor: default; }
-  .annotation-bar .count {
+  .controls-right > button:hover { background: var(--tab-hover); color: var(--text); }
+  .controls-right > button:disabled { opacity: 0.3; cursor: default; }
+  .controls-right > .count {
     font-size: 12px;
     color: var(--text-tertiary);
   }
@@ -933,7 +974,6 @@ export const CSS_STYLES = `
 
   /* ── Live mode badge ── */
   .live-badge {
-    margin-left: auto;
     background: #e53e3e;
     color: white;
     font-size: 11px;

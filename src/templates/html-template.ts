@@ -37,23 +37,31 @@ ${CSS_STYLES}
 </head>
 <body class="hide-tools hide-thinking hide-tagging">
 <div class="header">
-  <h1>${params.title}</h1>
-  <div class="meta">
-    ${params.metaHtml}
+  <div class="header-left">
+    <h1>${params.title}</h1>
+    <div class="meta">
+      ${params.metaHtml}
+    </div>
   </div>
+  <button id="theme-toggle" onclick="cycleTheme()" title="Toggle dark/light mode">&#9790;</button>
 </div>
 <div class="controls">
-  <button class="toc-toggle" onclick="toggleToc()" title="Table of Contents">&#9776; TOC</button>
-  <span style="border-left: 1px solid var(--border); height: 16px;"></span>
-  <label><input type="checkbox" id="toggle-tools" onchange="document.body.classList.toggle('hide-tools', !this.checked)"> Show tools</label>
-  <label><input type="checkbox" id="toggle-thinking" onchange="document.body.classList.toggle('hide-thinking', !this.checked)"> Show thinking</label>
-  <label><input type="checkbox" id="toggle-tagging" onchange="document.body.classList.toggle('hide-tagging', !this.checked)"> Tags &amp; kinds</label>
-  <span style="border-left: 1px solid var(--border); height: 16px;"></span>
-  <button id="theme-toggle" onclick="cycleTheme()" title="Toggle dark/light mode">&#9790;</button>
-  <div class="annotation-bar">
-    <button id="btn-highlight" onclick="annotate()" disabled title="Select text first, then click to annotate (Mod+Shift+H)">Highlight</button>
+  <div class="controls-left">
+    <button class="toc-toggle" onclick="toggleToc()" title="Table of Contents">&#9776; TOC</button>
+  </div>
+  <div class="controls-right">
+    <button id="btn-highlight" onclick="annotate()" disabled title="Select text then press h, or click this button">Highlight</button>
     <button id="btn-export" onclick="toggleExport()">Highlights</button>
     <span class="count" id="annotation-count"></span>
+    <span style="border-left: 1px solid var(--border); height: 16px;"></span>
+    <div class="settings-menu">
+      <button class="settings-toggle" onclick="this.parentElement.classList.toggle('open')" title="Display settings">&#9881;</button>
+      <div class="settings-dropdown">
+        <label><input type="checkbox" id="toggle-tools" onchange="document.body.classList.toggle('hide-tools', !this.checked)"> Show tools</label>
+        <label><input type="checkbox" id="toggle-thinking" onchange="document.body.classList.toggle('hide-thinking', !this.checked)"> Show thinking</label>
+        <label><input type="checkbox" id="toggle-tagging" onchange="document.body.classList.toggle('hide-tagging', !this.checked)"> Tags &amp; kinds</label>
+      </div>
+    </div>
   </div>
 </div>
 

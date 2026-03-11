@@ -735,7 +735,12 @@ HTML_TEMPLATE = """\
     background: var(--surface);
     border-bottom: 1px solid var(--border);
     padding: 20px 24px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
   }}
+
+  .header-left {{ flex: 1; min-width: 0; }}
 
   .header h1 {{
     font-size: 18px;
@@ -757,13 +762,16 @@ HTML_TEMPLATE = """\
     border-bottom: 1px solid var(--border);
     padding: 8px 24px;
     display: flex;
-    gap: 12px;
+    justify-content: space-between;
     font-size: 13px;
     position: sticky;
     top: 0;
     z-index: 99;
     align-items: center;
   }}
+
+  .controls-left {{ display: flex; align-items: center; gap: 12px; }}
+  .controls-right {{ display: flex; align-items: center; gap: 10px; }}
 
   .controls label {{
     cursor: pointer;
@@ -796,14 +804,53 @@ HTML_TEMPLATE = """\
     background: var(--tab-bg);
     border: none;
     color: var(--text-muted);
-    padding: 5px 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.1s ease;
+    line-height: 1;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }}
+  #theme-toggle:hover {{ background: var(--tab-hover); color: var(--text); }}
+
+  /* Settings dropdown */
+  .settings-menu {{ position: relative; }}
+  .settings-toggle {{
+    background: var(--tab-bg);
+    border: none;
+    color: var(--text-muted);
+    padding: 5px 10px;
     border-radius: 6px;
     font-size: 15px;
     cursor: pointer;
     transition: all 0.1s ease;
     line-height: 1;
   }}
-  #theme-toggle:hover {{ background: var(--tab-hover); color: var(--text); }}
+  .settings-toggle:hover {{ background: var(--tab-hover); color: var(--text); }}
+  .settings-dropdown {{
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 200;
+    white-space: nowrap;
+  }}
+  .settings-menu.open .settings-dropdown {{ display: flex; flex-direction: column; gap: 6px; }}
+  .settings-dropdown label {{
+    cursor: pointer;
+    color: var(--text-muted);
+    user-select: none;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 2px 0;
+  }}
 
   .conversation {{
     max-width: 100%;
@@ -1300,13 +1347,7 @@ HTML_TEMPLATE = """\
     background: rgba(94, 106, 210, 0.25);
   }}
 
-  .annotation-bar {{
-    display: flex;
-    gap: 6px;
-    align-items: center;
-  }}
-
-  .annotation-bar button {{
+  .controls-right > button {{
     background: var(--tab-bg);
     border: none;
     color: var(--text-muted);
@@ -1319,9 +1360,9 @@ HTML_TEMPLATE = """\
     font-family: inherit;
     transition: all 0.1s ease;
   }}
-  .annotation-bar button:hover {{ background: var(--tab-hover); color: var(--text); }}
-  .annotation-bar button:disabled {{ opacity: 0.3; cursor: default; }}
-  .annotation-bar .count {{
+  .controls-right > button:hover {{ background: var(--tab-hover); color: var(--text); }}
+  .controls-right > button:disabled {{ opacity: 0.3; cursor: default; }}
+  .controls-right > .count {{
     font-size: 12px;
     color: var(--text-tertiary);
   }}
@@ -1561,24 +1602,31 @@ HTML_TEMPLATE = """\
 </head>
 <body class="hide-tools hide-thinking hide-tagging">
 <div class="header">
-  <h1>{title}</h1>
-  <div class="meta">
-    {meta_html}
+  <div class="header-left">
+    <h1>{title}</h1>
+    <div class="meta">
+      {meta_html}
+    </div>
   </div>
+  <button id="theme-toggle" onclick="cycleTheme()" title="Toggle dark/light mode">&#9790;</button>
 </div>
 <div class="controls">
-  <button class="toc-toggle" onclick="toggleToc()" title="Table of Contents">&#9776; TOC</button>
-  <span style="border-left: 1px solid var(--border); height: 16px;"></span>
-  <label><input type="checkbox" id="toggle-tools" onchange="document.body.classList.toggle('hide-tools', !this.checked)"> Show tools</label>
-  <label><input type="checkbox" id="toggle-thinking" onchange="document.body.classList.toggle('hide-thinking', !this.checked)"> Show thinking</label>
-  <label><input type="checkbox" id="toggle-tagging" onchange="document.body.classList.toggle('hide-tagging', !this.checked)"> Tags &amp; kinds</label>
-  <span style="border-left: 1px solid var(--border); height: 16px;"></span>
-  <button id="theme-toggle" onclick="cycleTheme()" title="Toggle dark/light mode">&#9790;</button>
-  <span style="border-left: 1px solid var(--border); height: 16px;"></span>
-  <div class="annotation-bar">
-    <button id="btn-highlight" onclick="annotate()" disabled title="Select text first, then click to annotate (Mod+Shift+H)">Highlight</button>
+  <div class="controls-left">
+    <button class="toc-toggle" onclick="toggleToc()" title="Table of Contents">&#9776; TOC</button>
+  </div>
+  <div class="controls-right">
+    <button id="btn-highlight" onclick="annotate()" disabled title="Select text then press h, or click this button">Highlight</button>
     <button id="btn-export" onclick="toggleExport()">Highlights</button>
     <span class="count" id="annotation-count"></span>
+    <span style="border-left: 1px solid var(--border); height: 16px;"></span>
+    <div class="settings-menu">
+      <button class="settings-toggle" onclick="this.parentElement.classList.toggle('open')" title="Display settings">&#9881;</button>
+      <div class="settings-dropdown">
+        <label><input type="checkbox" id="toggle-tools" onchange="document.body.classList.toggle('hide-tools', !this.checked)"> Show tools</label>
+        <label><input type="checkbox" id="toggle-thinking" onchange="document.body.classList.toggle('hide-thinking', !this.checked)"> Show thinking</label>
+        <label><input type="checkbox" id="toggle-tagging" onchange="document.body.classList.toggle('hide-tagging', !this.checked)"> Tags &amp; kinds</label>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1669,6 +1717,14 @@ function cycleTheme() {{
     }}
   }}
 }})();
+
+// ── Close settings dropdown on outside click ──
+document.addEventListener('click', function(e) {{
+  var menu = document.querySelector('.settings-menu');
+  if (menu && menu.classList.contains('open') && !menu.contains(e.target)) {{
+    menu.classList.remove('open');
+  }}
+}});
 
 // ── TOC ──
 function toggleToc() {{
