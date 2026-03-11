@@ -876,7 +876,5 @@ export const CSS_STYLES = `
   }
   .export-panel-footer button:hover { background: var(--tab-hover); }
   .export-panel-footer button.primary { background: var(--accent); color: #fff; }
-  .export-panel-footer button.primary:hover { opacity: 0.85; }
-  .export-panel-footer button.primary { background: var(--accent); color: #fff; }
   .export-panel-footer button.primary:hover { background: var(--accent-hover); }
 `;
