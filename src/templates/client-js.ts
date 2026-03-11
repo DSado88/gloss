@@ -576,6 +576,20 @@ function escXml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// Reconstruct full quote from convoData using char offsets, falling back to stored text
+function fullQuote(ann) {
+  const ti = ann.turnIndex ?? -1;
+  const bi = ann.blockIndex ?? 0;
+  if (ti >= 0 && ti < convoData.length && ann.charStart >= 0 && ann.charEnd > ann.charStart) {
+    const blockText = (convoData[ti].text || [])[bi];
+    if (blockText) {
+      const reconstructed = blockText.slice(ann.charStart, ann.charEnd);
+      if (reconstructed.length > 0) return reconstructed;
+    }
+  }
+  return ann.text || '';
+}
+
 // ── Copy for Claude (XML context bundle) ──
 function copyXmlExport(btn) {
   const ids = sortedAnnotationIds();
@@ -600,7 +614,7 @@ function copyXmlExport(btn) {
     grouped[kind].forEach(({ id, ann }) => {
       const turnIdx = ann.turnIndex ?? -1;
       const speaker = ann.role || '?';
-      const quote = (ann.text || '').replace(/\\n/g, ' ');
+      const quote = fullQuote(ann).replace(/\\n/g, ' ');
 
       xml += \`  <highlight turn="\${turnIdx}" speaker="\${speaker}" kind="\${kind}"\`;
       if (ann.tags && ann.tags.length) xml += \` tags="\${ann.tags.join(',')}"\`;
@@ -633,7 +647,7 @@ function copyMarkdownExport(btn) {
     const time = ann.time ? \`, \${ann.time}\` : '';
     const turnRef = ann.turnIndex ?? (ann.turnId ? ann.turnId.replace('turn-', '') : '?');
     const kindLabel = (ann.kind && ann.kind !== 'highlight') ? \` [\${ann.kind}]\` : '';
-    const quote = ann.text.replace(/\\n/g, ' ');
+    const quote = fullQuote(ann).replace(/\\n/g, ' ');
 
     out += \`\${i + 1}. [\${speaker}\${time}, turn #\${turnRef}]\${kindLabel} "\${quote}"\\n\`;
 
@@ -671,7 +685,7 @@ function copyJsonlSlice(btn) {
     const ti = ann.turnIndex ?? -1;
     if (ti < 0) return;
     if (!turnNotes[ti]) turnNotes[ti] = [];
-    const note = { quote: (ann.text || '').replace(/\\n/g, ' ').substring(0, 200) };
+    const note = { quote: fullQuote(ann).replace(/\\n/g, ' ') };
     if (ann.comment) note.comment = ann.comment;
     if (ann.kind && ann.kind !== 'highlight') note.kind = ann.kind;
     if (ann.tags?.length) note.tags = ann.tags;
