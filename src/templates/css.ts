@@ -617,6 +617,13 @@ export const CSS_STYLES = `
     padding: 0 1px;
     transition: background 0.15s;
   }
+  /* Hide marks wrapping whitespace between list items */
+  ul > mark[data-annotation-id],
+  ol > mark[data-annotation-id] {
+    border-bottom: none;
+    background: none;
+    padding: 0;
+  }
   mark[data-annotation-id]:hover,
   mark[data-annotation-id].active {
     background: rgba(94, 106, 210, 0.25);
