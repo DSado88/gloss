@@ -248,9 +248,21 @@ export function backfillFtsIndex(db: ConvoDb): void {
     file_size?: number | null;
   }>;
 
-  const needsIndexing = sessions.filter(
-    (s) => s.jsonl_path && !db.isFtsIndexed(s.id),
-  );
+  // Check each session: needs indexing if never indexed or file changed since last index
+  const needsIndexing: Array<{ id: string; jsonl_path: string; mtime: number }> = [];
+  for (const s of sessions) {
+    if (!s.jsonl_path) continue;
+    try {
+      const stat = fs.statSync(s.jsonl_path);
+      if (!stat.isFile() || stat.size > FTS_INDEX_LIMIT) continue;
+      const mtime = Math.floor(stat.mtimeMs / 1000);
+      if (db.ftsNeedsIndexing(s.id, mtime)) {
+        needsIndexing.push({ id: s.id, jsonl_path: s.jsonl_path, mtime });
+      }
+    } catch {
+      continue;
+    }
+  }
 
   if (needsIndexing.length === 0) return;
 
@@ -262,11 +274,7 @@ export function backfillFtsIndex(db: ConvoDb): void {
     const end = Math.min(i + 3, needsIndexing.length);
     for (; i < end; i++) {
       const s = needsIndexing[i];
-      if (!s.jsonl_path) continue;
       try {
-        const stat = fs.statSync(s.jsonl_path);
-        if (!stat.isFile() || stat.size > FTS_INDEX_LIMIT) continue;
-
         const content = fs.readFileSync(s.jsonl_path, "utf-8");
         const parser = new IncrementalParser();
         parser.feedLines(content.split("\n"));
@@ -280,7 +288,7 @@ export function backfillFtsIndex(db: ConvoDb): void {
             .join("\n"),
         }));
 
-        db.indexSession(s.id, ftsData);
+        db.indexSession(s.id, ftsData, s.mtime);
         indexed++;
       } catch {
         // skip unreadable files

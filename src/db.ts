@@ -142,7 +142,8 @@ CREATE INDEX IF NOT EXISTS idx_fts_map_session ON fts_map(session_id);
 CREATE TABLE IF NOT EXISTS fts_status (
   session_id TEXT PRIMARY KEY,
   indexed_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  turn_count INTEGER NOT NULL DEFAULT 0
+  turn_count INTEGER NOT NULL DEFAULT 0,
+  file_mtime INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS conversation_fts USING fts5(
@@ -523,14 +524,15 @@ export class ConvoDb {
 
   // ---- Full-text search ---------------------------------------------------
 
-  /** Check if a session has been indexed for FTS */
-  isFtsIndexed(sessionId: string): boolean {
-    const row = this.db.query("SELECT 1 FROM fts_status WHERE session_id = ?").get(sessionId);
-    return !!row;
+  /** Check if a session needs (re)indexing based on file mtime */
+  ftsNeedsIndexing(sessionId: string, fileMtime: number): boolean {
+    const row = this.db.query("SELECT file_mtime FROM fts_status WHERE session_id = ?").get(sessionId) as { file_mtime: number } | null;
+    if (!row) return true; // never indexed
+    return fileMtime > row.file_mtime; // file changed since last index
   }
 
   /** Index a session's turns into FTS. Replaces any existing index for the session. */
-  indexSession(sessionId: string, turns: { role: string; text: string }[]): void {
+  indexSession(sessionId: string, turns: { role: string; text: string }[], fileMtime: number): void {
     // Remove old index for this session
     this.removeFtsIndex(sessionId);
 
@@ -541,7 +543,7 @@ export class ConvoDb {
       "INSERT INTO conversation_fts (rowid, text) VALUES (?, ?)",
     );
     const insertStatus = this.db.prepare(
-      "INSERT OR REPLACE INTO fts_status (session_id, indexed_at, turn_count) VALUES (?, unixepoch(), ?)",
+      "INSERT OR REPLACE INTO fts_status (session_id, indexed_at, turn_count, file_mtime) VALUES (?, unixepoch(), ?, ?)",
     );
 
     this.db.exec("BEGIN");
@@ -553,7 +555,7 @@ export class ConvoDb {
         const mapId = (this.db.query("SELECT last_insert_rowid() as id").get() as { id: number }).id;
         insertFts.run(mapId, text);
       }
-      insertStatus.run(sessionId, turns.length);
+      insertStatus.run(sessionId, turns.length, fileMtime);
       this.db.exec("COMMIT");
     } catch (e) {
       this.db.exec("ROLLBACK");
@@ -671,6 +673,7 @@ export function openDb(dbPath?: string): ConvoDb {
   // Add columns that may not exist in older databases
   try { db.exec("ALTER TABLE sessions ADD COLUMN last_modified INTEGER"); } catch {}
   try { db.exec("ALTER TABLE sessions ADD COLUMN file_size INTEGER"); } catch {}
+  try { db.exec("ALTER TABLE fts_status ADD COLUMN file_mtime INTEGER NOT NULL DEFAULT 0"); } catch {}
 
   return new ConvoDb(db);
 }
