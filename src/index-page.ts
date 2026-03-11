@@ -381,6 +381,7 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
     --border: #30363d;
     --accent: #da7756;
     --accent2: #da775620;
+    --logo-invert: invert(1);
   }
   @media (prefers-color-scheme: light) {
     :root {
@@ -392,6 +393,7 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
       --border: #d0d7de;
       --accent: #c2613a;
       --accent2: #c2613a15;
+      --logo-invert: none;
     }
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -477,6 +479,7 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
   }
   .s-meta { font-size: 0.78rem; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .s-title { font-size: 0.78rem; color: #5eead4; font-weight: 500; margin-left: 6px; }
+  .s-fts { font-size: 0.7rem; color: var(--accent); margin-left: 6px; opacity: 0.8; }
   @media (prefers-color-scheme: light) { .s-title { color: #0f766e; } }
   .s-time { font-size: 0.78rem; color: var(--text2); white-space: nowrap; }
   .s-turns { font-size: 0.78rem; color: var(--text2); text-align: right; }
@@ -685,7 +688,8 @@ function renderRecent(filtered) {
     html += '<a class="session-row" href="/c/' + s.id + '">';
     html += '<span class="s-project" title="' + esc(s.fullProject) + '">' + proj + '</span>';
     const titleBit = s.title ? ' <span class="s-title">' + esc(s.title) + '</span>' : '';
-    html += '<span><span class="s-id">' + s.id + '</span>' + titleBit + '</span>';
+    const ftsBit = s._ftsMatch ? ' <span class="s-fts">' + s._ftsMatch + ' matches</span>' : '';
+    html += '<span><span class="s-id">' + s.id + '</span>' + titleBit + ftsBit + '</span>';
     html += '<span class="s-time">' + fmtTime(s.last_modified) + '</span>';
     html += '<span class="s-turns">' + (s.turn_count || '—') + '</span>';
     html += '<span class="s-size">' + fmtSize(s.file_size) + '</span>';
@@ -736,23 +740,75 @@ function renderByProject(filtered) {
 }
 
 function render() {
-  const filtered = filter(ALL);
+  let filtered = filter(ALL);
   const unmuted = mutedProjects.size ? ALL.filter(s => !mutedProjects.has(s.project || s.dirProject || 'Unknown')).length : ALL.length;
-  const label = query ? filtered.length + ' of ' + unmuted : (mutedProjects.size ? unmuted + ' of ' + ALL.length : '' + ALL.length);
+
+  // Merge FTS results: add sessions found by content search that aren't in local filter
+  let ftsExtra = 0;
+  if (ftsResults && ftsResults.length > 0 && ftsQuery === query.trim()) {
+    const localIds = new Set(filtered.map(s => s.id));
+    for (const r of ftsResults) {
+      if (!localIds.has(r.id)) {
+        filtered.push({
+          id: r.id,
+          title: r.title || '',
+          project: r.project || '',
+          fullProject: r.project || '',
+          dirProject: r.project || '',
+          model: r.model || '',
+          last_modified: r.last_modified || 0,
+          turn_count: r.turn_count || 0,
+          file_size: r.file_size || 0,
+          _ftsMatch: r.match_count,
+        });
+        ftsExtra++;
+      } else {
+        // Mark existing entries with FTS match count
+        const existing = filtered.find(s => s.id === r.id);
+        if (existing) existing._ftsMatch = r.match_count;
+      }
+    }
+  }
+
+  const label = query
+    ? filtered.length + ' of ' + unmuted + (ftsExtra ? ' (' + ftsExtra + ' from content search)' : '')
+    : (mutedProjects.size ? unmuted + ' of ' + ALL.length : '' + ALL.length);
   document.getElementById('count').textContent = label + ' sessions';
 
   if (filtered.length === 0) {
-    document.getElementById('content').innerHTML = '<div class="empty">No matching conversations.</div>';
+    document.getElementById('content').innerHTML = '<div class="empty">No matching conversations.' + (query && query.length >= 3 ? ' Searching content...' : '') + '</div>';
     return;
   }
 
   document.getElementById('content').innerHTML = grouped ? renderByProject(filtered) : renderRecent(filtered);
 }
 
+let ftsResults = null;
+let ftsTimer = null;
+let ftsQuery = '';
+
+function doFtsSearch(q) {
+  if (!q || q.length < 3) { ftsResults = null; ftsQuery = ''; render(); return; }
+  fetch('/api/search?q=' + encodeURIComponent(q))
+    .then(r => r.json())
+    .then(data => {
+      if (query !== q) return; // stale
+      ftsQuery = q;
+      ftsResults = data.results || [];
+      render();
+    })
+    .catch(() => {});
+}
+
 document.getElementById('search').addEventListener('input', function(e) {
   query = e.target.value;
   showCount = 80;
+  ftsResults = null;
   render();
+  clearTimeout(ftsTimer);
+  if (query.trim().length >= 3) {
+    ftsTimer = setTimeout(() => doFtsSearch(query.trim()), 300);
+  }
 });
 
 // --- Project filter ---

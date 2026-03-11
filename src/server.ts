@@ -9,7 +9,7 @@ import { CSS_STYLES } from "./templates/css.js";
 import { renderTurn } from "./renderer.js";
 import { escape } from "./markdown.js";
 import { openDb, type ConvoDb } from "./db.js";
-import { scanProjectsDir, syncToDb, backfillTurnCounts } from "./discovery.js";
+import { scanProjectsDir, syncToDb, backfillTurnCounts, backfillFtsIndex } from "./discovery.js";
 import { buildServerIndex } from "./index-page.js";
 import type { Turn, TextBlock, TocEntry } from "./types.js";
 import type { ServerWebSocket } from "bun";
@@ -220,16 +220,22 @@ export async function startServer(options: { port?: number } = {}): Promise<void
   // Import legacy sidecar annotations
   importLegacySidecars(db);
 
-  // Background: count turns for sessions that don't have counts yet
-  setTimeout(() => backfillTurnCounts(db), 500);
+  // Background: count turns, then index for FTS
+  setTimeout(() => {
+    backfillTurnCounts(db);
+    setTimeout(() => backfillFtsIndex(db), 2000);
+  }, 500);
 
   // Periodic rescan
   setInterval(() => {
     try {
       const freshSessions = scanProjectsDir();
       syncToDb(db, freshSessions);
-      // Backfill turns for any new sessions
-      setTimeout(() => backfillTurnCounts(db), 500);
+      // Backfill turns and FTS for any new sessions
+      setTimeout(() => {
+        backfillTurnCounts(db);
+        setTimeout(() => backfillFtsIndex(db), 2000);
+      }, 500);
     } catch {
       // best-effort
     }
@@ -264,6 +270,17 @@ export async function startServer(options: { port?: number } = {}): Promise<void
         return new Response(clientJsContent, {
           headers: { "Content-Type": "application/javascript; charset=utf-8", "Cache-Control": "public, max-age=60" },
         });
+      }
+      if (pathname === "/assets/logo.png") {
+        const logoPath = path.join(import.meta.dir, "..", "assets", "logo.png");
+        try {
+          const file = fs.readFileSync(logoPath);
+          return new Response(file, {
+            headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=3600" },
+          });
+        } catch {
+          return new Response("Not found", { status: 404 });
+        }
       }
 
       // API routes
@@ -549,6 +566,35 @@ export async function handleApiRoute(
         .map((b) => b.text || ""),
     }));
     return new Response(JSON.stringify(convoData), { headers: jsonHeaders });
+  }
+
+  // GET /api/search?q=...
+  if (pathname === "/api/search" && req.method === "GET") {
+    const url = new URL(req.url);
+    const q = url.searchParams.get("q")?.trim();
+    if (!q) {
+      return new Response(JSON.stringify({ results: [], indexed: db.ftsIndexedCount() }), { headers: jsonHeaders });
+    }
+    try {
+      const results = db.searchSessions(q, 30);
+      // Enrich with session metadata
+      const enriched = results.map((r) => {
+        const session = db.getSession(r.session_id);
+        return {
+          id: r.session_id,
+          match_count: r.match_count,
+          project: session?.project ?? "",
+          title: session?.title ?? "",
+          model: session?.model ?? "",
+          last_modified: session?.last_modified ?? session?.start_time ?? 0,
+          turn_count: session?.turn_count ?? 0,
+          file_size: session?.file_size ?? 0,
+        };
+      });
+      return new Response(JSON.stringify({ results: enriched, indexed: db.ftsIndexedCount() }), { headers: jsonHeaders });
+    } catch {
+      return new Response(JSON.stringify({ results: [], error: "Invalid search query", indexed: db.ftsIndexedCount() }), { headers: jsonHeaders });
+    }
   }
 
   // PATCH /api/sessions/:id/title

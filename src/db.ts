@@ -129,6 +129,27 @@ CREATE TRIGGER IF NOT EXISTS annotations_au AFTER UPDATE ON annotations BEGIN
   INSERT INTO annotations_fts(annotations_fts, rowid, text, comment) VALUES('delete', old.rowid, old.text, old.comment);
   INSERT INTO annotations_fts(rowid, text, comment) VALUES (new.rowid, new.text, new.comment);
 END;
+
+-- Full-conversation FTS: contentless index (inverted index only, no text stored)
+CREATE TABLE IF NOT EXISTS fts_map (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  turn_index INTEGER NOT NULL,
+  role TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_fts_map_session ON fts_map(session_id);
+
+CREATE TABLE IF NOT EXISTS fts_status (
+  session_id TEXT PRIMARY KEY,
+  indexed_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  turn_count INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS conversation_fts USING fts5(
+  text,
+  content='',
+  content_rowid='id'
+);
 `;
 
 // ---------------------------------------------------------------------------
@@ -498,6 +519,110 @@ export class ConvoDb {
       tags: a.tags.length ? a.tags : undefined,
       timestamp: a.created_at ? a.created_at * 1000 : undefined,
     }));
+  }
+
+  // ---- Full-text search ---------------------------------------------------
+
+  /** Check if a session has been indexed for FTS */
+  isFtsIndexed(sessionId: string): boolean {
+    const row = this.db.query("SELECT 1 FROM fts_status WHERE session_id = ?").get(sessionId);
+    return !!row;
+  }
+
+  /** Index a session's turns into FTS. Replaces any existing index for the session. */
+  indexSession(sessionId: string, turns: { role: string; text: string }[]): void {
+    // Remove old index for this session
+    this.removeFtsIndex(sessionId);
+
+    const insertMap = this.db.prepare(
+      "INSERT INTO fts_map (session_id, turn_index, role) VALUES (?, ?, ?)",
+    );
+    const insertFts = this.db.prepare(
+      "INSERT INTO conversation_fts (rowid, text) VALUES (?, ?)",
+    );
+    const insertStatus = this.db.prepare(
+      "INSERT OR REPLACE INTO fts_status (session_id, indexed_at, turn_count) VALUES (?, unixepoch(), ?)",
+    );
+
+    this.db.exec("BEGIN");
+    try {
+      for (let i = 0; i < turns.length; i++) {
+        const text = turns[i].text.trim();
+        if (!text) continue;
+        insertMap.run(sessionId, i, turns[i].role);
+        const mapId = (this.db.query("SELECT last_insert_rowid() as id").get() as { id: number }).id;
+        insertFts.run(mapId, text);
+      }
+      insertStatus.run(sessionId, turns.length);
+      this.db.exec("COMMIT");
+    } catch (e) {
+      this.db.exec("ROLLBACK");
+      throw e;
+    }
+  }
+
+  /** Remove FTS index for a session */
+  removeFtsIndex(sessionId: string): void {
+    const rows = this.db.query("SELECT id FROM fts_map WHERE session_id = ?").all(sessionId) as { id: number }[];
+    if (rows.length > 0) {
+      for (const row of rows) {
+        this.db.run("INSERT INTO conversation_fts(conversation_fts, rowid, text) VALUES('delete', ?, '')", [row.id]);
+      }
+      this.db.run("DELETE FROM fts_map WHERE session_id = ?", [sessionId]);
+    }
+    this.db.run("DELETE FROM fts_status WHERE session_id = ?", [sessionId]);
+  }
+
+  /** Search conversations. Returns matching sessions with turn references. */
+  searchConversations(query: string, limit = 50): Array<{
+    session_id: string;
+    turn_index: number;
+    role: string;
+    rank: number;
+  }> {
+    // FTS5 query — wrap in double quotes for phrase, or pass as-is for boolean
+    const rows = this.db.query(`
+      SELECT m.session_id, m.turn_index, m.role, f.rank
+      FROM conversation_fts f
+      JOIN fts_map m ON m.id = f.rowid
+      WHERE conversation_fts MATCH ?
+      ORDER BY f.rank
+      LIMIT ?
+    `).all(query, limit) as Array<{
+      session_id: string;
+      turn_index: number;
+      role: string;
+      rank: number;
+    }>;
+    return rows;
+  }
+
+  /** Search and group by session, returning top sessions with match counts. */
+  searchSessions(query: string, limit = 30): Array<{
+    session_id: string;
+    match_count: number;
+    best_rank: number;
+  }> {
+    const rows = this.db.query(`
+      SELECT m.session_id, COUNT(*) as match_count, MIN(f.rank) as best_rank
+      FROM conversation_fts f
+      JOIN fts_map m ON m.id = f.rowid
+      WHERE conversation_fts MATCH ?
+      GROUP BY m.session_id
+      ORDER BY best_rank
+      LIMIT ?
+    `).all(query, limit) as Array<{
+      session_id: string;
+      match_count: number;
+      best_rank: number;
+    }>;
+    return rows;
+  }
+
+  /** Get count of indexed sessions */
+  ftsIndexedCount(): number {
+    const row = this.db.query("SELECT COUNT(*) as n FROM fts_status").get() as { n: number };
+    return row.n;
   }
 
   // ---- Lifecycle ----------------------------------------------------------

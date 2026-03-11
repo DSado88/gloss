@@ -233,3 +233,66 @@ export function backfillTurnCounts(db: ConvoDb): void {
 
   batch();
 }
+
+/** Max file size for FTS indexing (100MB). Larger files skipped. */
+const FTS_INDEX_LIMIT = 100 * 1024 * 1024;
+
+/**
+ * Background FTS indexing: index conversation text for full-text search.
+ * Processes sessions that haven't been indexed yet, in batches.
+ */
+export function backfillFtsIndex(db: ConvoDb): void {
+  const sessions = db.listSessions({}) as Array<{
+    id: string;
+    jsonl_path?: string | null;
+    file_size?: number | null;
+  }>;
+
+  const needsIndexing = sessions.filter(
+    (s) => s.jsonl_path && !db.isFtsIndexed(s.id),
+  );
+
+  if (needsIndexing.length === 0) return;
+
+  console.log(`FTS indexing ${needsIndexing.length} sessions...`);
+  let i = 0;
+  let indexed = 0;
+
+  const batch = () => {
+    const end = Math.min(i + 3, needsIndexing.length);
+    for (; i < end; i++) {
+      const s = needsIndexing[i];
+      if (!s.jsonl_path) continue;
+      try {
+        const stat = fs.statSync(s.jsonl_path);
+        if (!stat.isFile() || stat.size > FTS_INDEX_LIMIT) continue;
+
+        const content = fs.readFileSync(s.jsonl_path, "utf-8");
+        const parser = new IncrementalParser();
+        parser.feedLines(content.split("\n"));
+        const turns = parser.getTurns();
+
+        const ftsData = turns.map((t) => ({
+          role: t.role,
+          text: t.blocks
+            .filter((b): b is { type: "text"; text: string } => b.type === "text")
+            .map((b) => b.text || "")
+            .join("\n"),
+        }));
+
+        db.indexSession(s.id, ftsData);
+        indexed++;
+      } catch {
+        // skip unreadable files
+      }
+    }
+
+    if (i < needsIndexing.length) {
+      setTimeout(batch, 10); // yield to event loop between batches
+    } else {
+      console.log(`FTS: ${indexed} sessions indexed`);
+    }
+  };
+
+  batch();
+}
