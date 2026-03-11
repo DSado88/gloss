@@ -62,7 +62,7 @@ describe("convertJsonlToHtml", () => {
 
     const content = fs.readFileSync(outputFile, "utf-8");
     expect(content).toContain("<!DOCTYPE html>");
-    expect(content).toContain("<html>");
+    expect(content).toContain("<html lang=\"en\">");
     expect(content).toContain("</html>");
   });
 

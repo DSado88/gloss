@@ -2,6 +2,25 @@ import { escape, renderMarkdownInline } from "./markdown.js";
 import type { Turn, TocEntry, ToolUseBlock, ToolResultBlock } from "./types.js";
 
 /**
+ * Count Unicode code points (not UTF-16 code units).
+ * Matches Python's len() behavior for strings with emoji/surrogate pairs.
+ */
+function codePointLength(s: string): number {
+  let count = 0;
+  for (const _ of s) count++;
+  return count;
+}
+
+/**
+ * Slice a string by Unicode code point offsets (not UTF-16 code units).
+ * Matches Python's s[:n] behavior for strings with emoji/surrogate pairs.
+ */
+function codePointSlice(s: string, start: number, end?: number): string {
+  const codePoints = [...s];
+  return codePoints.slice(start, end).join("");
+}
+
+/**
  * Format ISO8601 timestamp to readable local time.
  * Returns "H:MM AM/PM" (12-hour, no leading zero). Returns empty string on error.
  */
@@ -101,23 +120,26 @@ export function renderToolResult(block: ToolResultBlock): string {
     ? `<div class="tool-result-meta">${escape(block.meta)}</div>`
     : "";
 
+  // Use code-point length to match Python's len() for char counts
+  const cpLen = codePointLength(content);
+
   // Agent results with real content get rendered as markdown text
   const trimmed = content.trimStart();
-  if (content.length > 500 && !trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+  if (cpLen > 500 && !trimmed.startsWith("{") && !trimmed.startsWith("[")) {
     const rendered = renderMarkdownInline(content);
     return `<div class="tool-result agent-result${errorClass}">
-  ${resultHeader(isError, content.length)}
+  ${resultHeader(isError, cpLen)}
   <div class="tool-result-rendered"><p>${rendered}</p></div>
   ${metaHtml}
 </div>`;
   }
 
   // Short or structured results: show as preformatted text
-  if (content.length > 2000) {
-    const preview = escape(content.slice(0, 2000));
+  if (cpLen > 2000) {
+    const preview = escape(codePointSlice(content, 0, 2000));
     const display = escape(content);
     return `<div class="tool-result${errorClass}">
-  ${resultHeader(isError, content.length)}
+  ${resultHeader(isError, cpLen)}
   <pre class="tool-result-preview">${preview}\u2026</pre>
   <pre class="tool-result-full">${display}</pre>
   ${metaHtml}

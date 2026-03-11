@@ -879,4 +879,24 @@ export const CSS_STYLES = `
   .export-panel-footer button.primary:hover { opacity: 0.85; }
   .export-panel-footer button.primary { background: var(--accent); color: #fff; }
   .export-panel-footer button.primary:hover { background: var(--accent-hover); }
+
+  /* ── Live mode badge ── */
+  .live-badge {
+    background: #e53e3e;
+    color: white;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.05em;
+    animation: live-pulse 2s ease-in-out infinite;
+  }
+  @keyframes live-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+  .ws-disconnected .live-badge {
+    background: var(--text-tertiary);
+    animation: none;
+  }
 `;

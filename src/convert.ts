@@ -10,40 +10,25 @@ import {
   type HtmlPageParams,
 } from "./templates/html-template.js";
 import { updateIndex } from "./index-page.js";
-import type { TocEntry, TextBlock } from "./types.js";
+import type { Conversation, TocEntry, TextBlock } from "./types.js";
 
-export function convertJsonlToHtml(
-  inputFile: string,
-  outputFile?: string,
-  options?: { includeThinking?: boolean; includeTools?: boolean }
-): string {
+/**
+ * Build the HtmlPageParams from a parsed Conversation.
+ *
+ * This is a pure function that renders all turns and assembles every field
+ * needed by `buildHtmlPage()`.  Both the static converter and the live
+ * server call this so the rendering logic is shared.
+ */
+export function buildPageParams(
+  convo: Conversation,
+  inputPath: string,
+  viewerDir: string,
+  options?: { includeThinking?: boolean; includeTools?: boolean; extraScript?: string }
+): HtmlPageParams {
   const includeThinking = options?.includeThinking ?? true;
   const includeTools = options?.includeTools ?? true;
 
-  const inputPath = path.resolve(inputFile);
-
-  if (!fs.existsSync(inputPath)) {
-    console.error(`Error: File not found: ${inputFile}`);
-    process.exit(1);
-  }
-
-  // Parse so we have sessionId for default output path
-  const convo = buildConversation(inputFile);
-  const viewerDir = path.join(os.homedir(), ".claude", "viewer");
   const sessionId = convo.sessionId || path.parse(inputPath).name;
-
-  // Determine output path
-  let outputPath: string;
-  if (outputFile) {
-    outputPath = path.resolve(outputFile);
-  } else if (convo.sessionId) {
-    fs.mkdirSync(viewerDir, { recursive: true });
-    const shortId = convo.sessionId.slice(0, 8);
-    outputPath = path.join(viewerDir, `${shortId}.html`);
-  } else {
-    const parsed = path.parse(inputPath);
-    outputPath = path.join(parsed.dir, `${parsed.name}.html`);
-  }
 
   // Render turns
   const turnsHtml: string[] = [];
@@ -75,7 +60,7 @@ export function convertJsonlToHtml(
           month: "long",
           day: "numeric",
           year: "numeric",
-          hour: "numeric",
+          hour: "2-digit",
           minute: "2-digit",
           hour12: true,
         });
@@ -149,8 +134,7 @@ export function convertJsonlToHtml(
     bakedAnnotationsJson = "{}";
   }
 
-  // Build HTML page
-  const params: HtmlPageParams = {
+  return {
     title: escape(title),
     metaHtml: metaParts.join("\n    "),
     conversationHtml: turnsHtml.join("\n"),
@@ -160,7 +144,47 @@ export function convertJsonlToHtml(
     metaComment,
     conversationDataJson: safeForScript(conversationDataJson),
     bakedAnnotationsJson: safeForScript(bakedAnnotationsJson),
+    extraScript: options?.extraScript,
   };
+}
+
+export function convertJsonlToHtml(
+  inputFile: string,
+  outputFile?: string,
+  options?: { includeThinking?: boolean; includeTools?: boolean }
+): string {
+  const includeThinking = options?.includeThinking ?? true;
+  const includeTools = options?.includeTools ?? true;
+
+  const inputPath = path.resolve(inputFile);
+
+  if (!fs.existsSync(inputPath)) {
+    console.error(`Error: File not found: ${inputFile}`);
+    process.exit(1);
+  }
+
+  // Parse so we have sessionId for default output path
+  const convo = buildConversation(inputFile);
+  const viewerDir = path.join(os.homedir(), ".claude", "viewer");
+  const sessionId = convo.sessionId || path.parse(inputPath).name;
+
+  // Determine output path
+  let outputPath: string;
+  if (outputFile) {
+    outputPath = path.resolve(outputFile);
+  } else if (convo.sessionId) {
+    fs.mkdirSync(viewerDir, { recursive: true });
+    const shortId = convo.sessionId.slice(0, 8);
+    outputPath = path.join(viewerDir, `${shortId}.html`);
+  } else {
+    const parsed = path.parse(inputPath);
+    outputPath = path.join(parsed.dir, `${parsed.name}.html`);
+  }
+
+  const params = buildPageParams(convo, inputPath, viewerDir, {
+    includeThinking,
+    includeTools,
+  });
 
   const htmlOut = buildHtmlPage(params);
 
@@ -168,6 +192,7 @@ export function convertJsonlToHtml(
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, htmlOut, "utf-8");
 
+  const turnCount = convo.turns.length;
   const sizeKb = Buffer.byteLength(htmlOut, "utf-8") / 1024;
   console.log(
     `${path.basename(inputPath)} -> ${outputPath} (${turnCount} turns, ${Math.round(sizeKb)} KB)`
