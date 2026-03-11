@@ -10,7 +10,9 @@ import {
   type HtmlPageParams,
 } from "./templates/html-template.js";
 import { updateIndex } from "./index-page.js";
+import { openDb } from "./db.js";
 import type { Conversation, TocEntry, TextBlock } from "./types.js";
+import type { SidecarAnnotation } from "./db.js";
 
 /**
  * Build the HtmlPageParams from a parsed Conversation.
@@ -201,6 +203,46 @@ export function convertJsonlToHtml(
   // Update index if outputting to viewer directory
   if (path.resolve(path.dirname(outputPath)) === path.resolve(viewerDir)) {
     updateIndex(viewerDir);
+  }
+
+  // Sync session + annotations to SQLite
+  try {
+    const db = openDb();
+    db.upsertSession({
+      id: sessionId,
+      jsonl_path: inputPath,
+      title: convo.projectDir ? `${convo.projectDir}` : undefined,
+      project: convo.projectDir || undefined,
+      model: convo.model || undefined,
+      start_time: convo.startTime ? Math.floor(new Date(convo.startTime).getTime() / 1000) : undefined,
+      turn_count: turnCount,
+    });
+
+    // Import sidecar annotations if they exist
+    const sidecarPath = path.join(viewerDir, `${sessionId}.annotations.json`);
+    if (fs.existsSync(sidecarPath)) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(sidecarPath, "utf-8"));
+        let annotations: SidecarAnnotation[];
+        if (Array.isArray(raw)) {
+          annotations = raw;
+        } else {
+          // Dict keyed by annotation ID — inject the key as `id`
+          annotations = Object.entries(raw).map(([id, v]: [string, any]) => ({ id, ...v }));
+        }
+        if (annotations.length) {
+          const result = db.importAnnotationsJson(sessionId, annotations);
+          if (result.imported > 0) {
+            console.log(`  → Synced ${result.imported} annotations to ~/.convo/db.sqlite`);
+          }
+        }
+      } catch {
+        // ignore malformed sidecar files
+      }
+    }
+    db.close();
+  } catch {
+    // SQLite sync is best-effort, don't fail the render
   }
 
   return outputPath;
