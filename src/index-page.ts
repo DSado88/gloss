@@ -476,7 +476,8 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
     color: var(--accent);
   }
   .s-meta { font-size: 0.78rem; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .s-title { font-size: 0.78rem; color: var(--accent); font-weight: 500; margin-left: 6px; }
+  .s-title { font-size: 0.78rem; color: #5eead4; font-weight: 500; margin-left: 6px; }
+  @media (prefers-color-scheme: light) { .s-title { color: #0f766e; } }
   .s-time { font-size: 0.78rem; color: var(--text2); white-space: nowrap; }
   .s-turns { font-size: 0.78rem; color: var(--text2); text-align: right; }
   .s-size { font-size: 0.78rem; color: var(--text2); text-align: right; }
@@ -684,7 +685,7 @@ function renderRecent(filtered) {
     html += '<a class="session-row" href="/c/' + s.id + '">';
     html += '<span class="s-project" title="' + esc(s.fullProject) + '">' + proj + '</span>';
     const titleBit = s.title ? ' <span class="s-title">' + esc(s.title) + '</span>' : '';
-    html += '<span><span class="s-id">' + s.id + '</span>' + titleBit + ' <span class="s-meta">' + esc(model) + '</span></span>';
+    html += '<span><span class="s-id">' + s.id + '</span>' + titleBit + '</span>';
     html += '<span class="s-time">' + fmtTime(s.last_modified) + '</span>';
     html += '<span class="s-turns">' + (s.turn_count || '—') + '</span>';
     html += '<span class="s-size">' + fmtSize(s.file_size) + '</span>';
@@ -723,7 +724,7 @@ function renderByProject(filtered) {
       html += '<a class="session-row" href="/c/' + s.id + '">';
       html += '<span class="s-project">' + esc(name) + '</span>';
       const titleBit = s.title ? ' <span class="s-title">' + esc(s.title) + '</span>' : '';
-      html += '<span><span class="s-id">' + s.id + '</span>' + titleBit + ' <span class="s-meta">' + esc(model) + '</span></span>';
+      html += '<span><span class="s-id">' + s.id + '</span>' + titleBit + '</span>';
       html += '<span class="s-time">' + fmtTime(s.last_modified) + '</span>';
       html += '<span class="s-turns">' + (s.turn_count || '—') + '</span>';
       html += '<span class="s-size">' + fmtSize(s.file_size) + '</span>';
