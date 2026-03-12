@@ -435,6 +435,8 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
     white-space: nowrap;
   }
   .view-btn.active { color: var(--accent); border-color: var(--accent); background: var(--accent2); }
+  #askBtn { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+  #askBtn:hover { opacity: 0.9; }
 
   /* Flat list */
   .session-table {
@@ -574,7 +576,8 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
     <span class="count" id="count"></span>
   </div>
   <div class="controls">
-    <input class="search" id="search" type="text" placeholder="Search..." autofocus>
+    <input class="search" id="search" type="text" placeholder="Search or ask a question..." autofocus>
+    <button class="view-btn" id="askBtn" onclick="askAI()" style="display:none">Ask AI</button>
     <button class="view-btn" id="groupBtn" onclick="toggleGroup()">Group projects</button>
     <div class="filter-wrap">
       <button class="view-btn filter-btn" id="filterBtn" onclick="toggleFilter()">Filter projects</button>
@@ -800,14 +803,34 @@ function doFtsSearch(q) {
     .catch(() => {});
 }
 
+function askAI() {
+  const q = document.getElementById('search').value.trim();
+  if (q) window.location.href = '/ask?q=' + encodeURIComponent(q);
+}
+
+function updateAskBtn(q) {
+  const btn = document.getElementById('askBtn');
+  if (!btn) return;
+  const isQuestion = q.length > 15 || q.endsWith('?') || /^(how|what|when|where|why|which|can|does|did|is|are|show|find|search|tell|explain|describe)\\b/i.test(q);
+  btn.style.display = isQuestion ? '' : 'none';
+}
+
 document.getElementById('search').addEventListener('input', function(e) {
   query = e.target.value;
   showCount = 80;
   ftsResults = null;
   render();
+  updateAskBtn(query.trim());
   clearTimeout(ftsTimer);
   if (query.trim().length >= 3) {
     ftsTimer = setTimeout(() => doFtsSearch(query.trim()), 300);
+  }
+});
+
+document.getElementById('search').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    e.preventDefault();
+    askAI();
   }
 });
 

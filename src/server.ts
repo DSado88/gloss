@@ -246,7 +246,8 @@ export async function startServer(options: { port?: number } = {}): Promise<void
 
   const server = Bun.serve<{ sessionId: string }>({
     port,
-    fetch(req, server) {
+    idleTimeout: 120, // seconds — ask endpoint shells out to claude
+    async fetch(req, server) {
       const url = new URL(req.url);
       const pathname = url.pathname;
 
@@ -292,6 +293,17 @@ export async function startServer(options: { port?: number } = {}): Promise<void
       if (pathname.startsWith("/c/")) {
         const sessionId = pathname.slice(3);
         return renderConversationPage(sessionId, port, db, includeThinking, includeTools);
+      }
+
+      // Ask page: /ask?q=... — returns loading shell instantly
+      if (pathname === "/ask") {
+        const q = url.searchParams.get("q")?.trim();
+        if (!q) return Response.redirect("/");
+        const { buildAskLoadingPage } = await import("./ask-page.js");
+        const html = buildAskLoadingPage(q);
+        return new Response(html, {
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        });
       }
 
       // Index page
@@ -566,6 +578,38 @@ export async function handleApiRoute(
         .map((b) => b.text || ""),
     }));
     return new Response(JSON.stringify(convoData), { headers: jsonHeaders });
+  }
+
+  // POST /api/ask — JSON response
+  if (pathname === "/api/ask" && req.method === "POST") {
+    const body = (await req.json()) as Record<string, unknown>;
+    const q = (body.query as string)?.trim();
+    if (!q) {
+      return new Response(JSON.stringify({ error: "No query" }), { status: 400, headers: jsonHeaders });
+    }
+    const { askQuestion } = await import("./ask.js");
+    const result = await askQuestion(db, q, {
+      maxSources: (body.maxSources as number) ?? undefined,
+    });
+    return new Response(JSON.stringify(result), { headers: jsonHeaders });
+  }
+
+  // POST /api/ask-html — returns rendered HTML fragment
+  if (pathname === "/api/ask-html" && req.method === "POST") {
+    const body = (await req.json()) as Record<string, unknown>;
+    const q = (body.query as string)?.trim();
+    if (!q) {
+      return new Response("<div class=\"ask-error\">No query</div>", {
+        status: 400, headers: { "Content-Type": "text/html; charset=utf-8" },
+      });
+    }
+    const { askQuestion } = await import("./ask.js");
+    const { buildAskResultsHtml } = await import("./ask-page.js");
+    const result = await askQuestion(db, q);
+    const html = buildAskResultsHtml(result);
+    return new Response(html, {
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
   }
 
   // GET /api/search?q=...
