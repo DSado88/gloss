@@ -517,6 +517,7 @@ export class ConvoDb {
       comment: a.comment ?? "",
       kind: a.kind ?? "highlight",
       speaker: a.speaker ?? undefined,
+      role: a.speaker ?? undefined,
       tags: a.tags.length ? a.tags : undefined,
       timestamp: a.created_at ? a.created_at * 1000 : undefined,
     }));

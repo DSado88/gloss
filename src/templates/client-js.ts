@@ -89,6 +89,11 @@ const convoData = JSON.parse(document.getElementById('conversation-data')?.textC
 const bakedAnnotations = JSON.parse(document.getElementById('baked-annotations')?.textContent || '{}');
 const storedAnnotations = IS_SERVER ? {} : JSON.parse(localStorage.getItem('annotations_' + SESSION_ID) || '{}');
 const annotations = Object.assign({}, bakedAnnotations, storedAnnotations);
+// Normalize: DB stores "speaker", client uses "role"
+for (const id of Object.keys(annotations)) {
+  const a = annotations[id];
+  if (!a.role && a.speaker) a.role = a.speaker;
+}
 let activeAnnotationId = null;
 let savedRange = null;
 
@@ -1024,6 +1029,10 @@ function connectWebSocket() {
       // Another tab updated annotations — merge and re-render
       if (msg.annotations) {
         Object.assign(annotations, msg.annotations);
+        for (const id of Object.keys(msg.annotations)) {
+          const a = annotations[id];
+          if (!a.role && a.speaker) a.role = a.speaker;
+        }
         restoreAnnotations();
         updateCount();
         const panel = document.getElementById('export-panel');
