@@ -116,6 +116,92 @@ function turnToPlainText(turn: Turn): string {
 const MAX_FILE_SIZE = 200 * 1024 * 1024; // 200 MB
 const CLAUDE_TIMEOUT_MS = 60_000;
 
+// ---------------------------------------------------------------------------
+// Claude-powered query extraction (step 3)
+// ---------------------------------------------------------------------------
+
+async function extractSearchTerms(query: string): Promise<string[]> {
+  try {
+    const home = process.env.HOME || os.homedir();
+    const env: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (k !== "CLAUDECODE" && v !== undefined) env[k] = v;
+    }
+    env.HOME = home;
+    if (!env.PATH) env.PATH = `/usr/local/bin:/usr/bin:/bin:${home}/.local/bin`;
+    const claudeBin = `${home}/.local/bin/claude`;
+
+    const prompt = `Extract 2-5 focused search terms or short phrases from this question. These will be used for full-text search in a conversation database. Return ONLY the terms, one per line, no numbering or explanation. Prefer specific nouns and project names over generic verbs.
+
+Question: ${query}`;
+
+    const proc = Bun.spawn([claudeBin, "-p"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env,
+    });
+    proc.stdin.write(prompt);
+    proc.stdin.flush();
+    proc.stdin.end();
+
+    const result = await Promise.race([
+      new Response(proc.stdout).text(),
+      new Promise<string>((_, reject) =>
+        setTimeout(() => reject(new Error("timeout")), 15_000),
+      ),
+    ]);
+
+    await proc.exited;
+    return result
+      .trim()
+      .split("\n")
+      .map((l) => l.trim().replace(/^[-*\d.]+\s*/, ""))
+      .filter((l) => l.length > 1 && l.length < 60);
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Session metadata search (step 1)
+// ---------------------------------------------------------------------------
+
+function searchMetadata(
+  db: ConvoDb,
+  query: string,
+  limit: number,
+): string[] {
+  // Extract meaningful words for LIKE matching
+  const words = query
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !QUESTION_WORDS.has(w) && !FILLER_WORDS.has(w));
+
+  if (words.length === 0) return [];
+
+  // Search project paths and titles
+  const conditions = words.map(() => "(LOWER(project) LIKE ? OR LOWER(title) LIKE ?)").join(" OR ");
+  const params: string[] = [];
+  for (const w of words) {
+    params.push(`%${w}%`, `%${w}%`);
+  }
+
+  try {
+    const rows = db.db.query(
+      `SELECT id FROM sessions WHERE ${conditions} ORDER BY coalesce(last_modified, imported_at) DESC LIMIT ?`,
+    ).all(...params, limit) as Array<{ id: string }>;
+    return rows.map((r) => r.id);
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Main pipeline
+// ---------------------------------------------------------------------------
+
 export async function askQuestion(
   db: ConvoDb,
   query: string,
@@ -126,26 +212,76 @@ export async function askQuestion(
   const contextTurns = options?.contextTurns ?? 1;
 
   // ------------------------------------------------------------------
-  // 1. FTS search (session-level — more robust against FTS corruption)
+  // 1-3: Run metadata, FTS, and Claude extraction in parallel
   // ------------------------------------------------------------------
+
+  // Start Claude term extraction first (slow, ~10s)
+  const termsPromise = extractSearchTerms(query);
+
+  // Metadata search (instant — sync DB query)
+  const metadataIds = searchMetadata(db, query, maxSources);
+
+  // FTS search with sanitized query (instant — sync DB query)
   const ftsQuery = sanitizeFtsQuery(query);
   let sessionHits: Array<{ session_id: string; match_count: number; best_rank: number }> = [];
   try {
-    sessionHits = db.searchSessions(ftsQuery, maxSources);
+    sessionHits = db.searchSessions(ftsQuery, maxSources * 2);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`[ask] FTS error for query "${ftsQuery}": ${msg}`);
   }
+
+  // Await Claude-extracted terms, then do additional targeted FTS
+  let claudeTerms: string[] = [];
+  try {
+    claudeTerms = await termsPromise;
+    console.log(`[ask] Claude extracted terms: ${claudeTerms.join(", ")}`);
+  } catch { /* non-fatal */ }
+
+  for (const term of claudeTerms) {
+    try {
+      const sanitized = sanitizeFtsQuery(term);
+      if (!sanitized) continue;
+      const hits = db.searchSessions(sanitized, maxSources);
+      sessionHits.push(...hits);
+    } catch { /* skip bad queries */ }
+  }
+
   const tFts = performance.now();
 
-  const sessionIds = sessionHits.map((h) => h.session_id);
+  // ------------------------------------------------------------------
+  // Merge & deduplicate session IDs (metadata first, then FTS ranked)
+  // ------------------------------------------------------------------
+  const seen = new Set<string>();
+  const sessionIds: string[] = [];
+
+  // Metadata matches get priority
+  for (const id of metadataIds) {
+    if (!seen.has(id)) { seen.add(id); sessionIds.push(id); }
+  }
+  // Then FTS hits, deduplicated and sorted by rank
+  const uniqueFts = new Map<string, { match_count: number; best_rank: number }>();
+  for (const h of sessionHits) {
+    const existing = uniqueFts.get(h.session_id);
+    if (!existing || h.best_rank < existing.best_rank) {
+      uniqueFts.set(h.session_id, h);
+    }
+  }
+  const sortedFts = [...uniqueFts.entries()]
+    .sort((a, b) => a[1].best_rank - b[1].best_rank);
+  for (const [id] of sortedFts) {
+    if (!seen.has(id)) { seen.add(id); sessionIds.push(id); }
+  }
+
+  // Cap total sources
+  const finalSessionIds = sessionIds.slice(0, maxSources);
 
   // ------------------------------------------------------------------
   // 3. Load turn context
   // ------------------------------------------------------------------
   const sources: AskSource[] = [];
 
-  for (const sessionId of sessionIds) {
+  for (const sessionId of finalSessionIds) {
     const session = db.getSession(sessionId);
     if (!session?.jsonl_path) continue;
 
@@ -170,7 +306,12 @@ export async function askQuestion(
     }
 
     // Find turns matching query keywords via simple text search
-    const keywords = ftsQuery.toLowerCase().split(/\s+/).filter(Boolean);
+    // Combine FTS tokens + Claude-extracted terms for better matching
+    const allTerms = new Set([
+      ...ftsQuery.toLowerCase().split(/\s+/).filter((t) => t !== "OR" && t.length > 1),
+      ...claudeTerms.map((t) => t.toLowerCase()),
+    ]);
+    const keywords = [...allTerms];
     const matchingIndices: number[] = [];
     for (let i = 0; i < allTurns.length; i++) {
       const text = turnToPlainText(allTurns[i]).toLowerCase();
