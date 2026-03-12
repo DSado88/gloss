@@ -240,8 +240,9 @@ const FTS_INDEX_LIMIT = 100 * 1024 * 1024;
 /**
  * Background FTS indexing: index conversation text for full-text search.
  * Processes sessions that haven't been indexed yet, in batches.
+ * Optional onComplete callback fires when all sessions are indexed.
  */
-export function backfillFtsIndex(db: ConvoDb): void {
+export function backfillFtsIndex(db: ConvoDb, onComplete?: () => void): void {
   const sessions = db.listSessions({}) as Array<{
     id: string;
     jsonl_path?: string | null;
@@ -264,7 +265,10 @@ export function backfillFtsIndex(db: ConvoDb): void {
     }
   }
 
-  if (needsIndexing.length === 0) return;
+  if (needsIndexing.length === 0) {
+    onComplete?.();
+    return;
+  }
 
   console.log(`FTS indexing ${needsIndexing.length} sessions...`);
   let i = 0;
@@ -299,6 +303,7 @@ export function backfillFtsIndex(db: ConvoDb): void {
       setTimeout(batch, 10); // yield to event loop between batches
     } else {
       console.log(`FTS: ${indexed} sessions indexed`);
+      onComplete?.();
     }
   };
 

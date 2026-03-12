@@ -12,7 +12,7 @@ export interface AskPageData {
     turns: Turn[];
     startTurnIndex: number;
   }>;
-  timing: { ftsMs: number; claudeMs: number; totalMs: number };
+  timing: { ftsMs: number; vectorMs?: number; claudeMs: number; totalMs: number };
   error?: string;
 }
 
@@ -278,8 +278,12 @@ export function buildAskResultsHtml(data: AskPageData): string {
 
   // Timing line
   const sessionCount = sources.length;
+  const timingParts: string[] = [];
+  if (timing.ftsMs) timingParts.push(`FTS ${timing.ftsMs}ms`);
+  if (timing.vectorMs) timingParts.push(`Vector ${timing.vectorMs}ms`);
+  if (timing.claudeMs) timingParts.push(`Claude ${timing.claudeMs}ms`);
   const timingHtml = `<div class="ask-timing">Searched ${sessionCount} session${sessionCount !== 1 ? "s" : ""} in ${timing.totalMs}ms`
-    + (timing.ftsMs ? ` <span class="timing-detail">(FTS ${timing.ftsMs}ms` + (timing.claudeMs ? `, Claude ${timing.claudeMs}ms` : "") + `)</span>` : "")
+    + (timingParts.length ? ` <span class="timing-detail">(${timingParts.join(", ")})</span>` : "")
     + `</div>`;
 
   // Render each source as a mini-conversation with the same turn styling as chat view

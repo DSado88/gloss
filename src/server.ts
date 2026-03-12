@@ -11,6 +11,8 @@ import { escape } from "./markdown.js";
 import { openDb, type ConvoDb } from "./db.js";
 import { scanProjectsDir, syncToDb, backfillTurnCounts, backfillFtsIndex } from "./discovery.js";
 import { buildServerIndex } from "./index-page.js";
+import { EmbeddingEngine, VectorIndex } from "./embeddings.js";
+import { backfillEmbeddings } from "./indexer.js";
 import type { Turn, TextBlock, TocEntry } from "./types.js";
 import type { ServerWebSocket } from "bun";
 
@@ -220,10 +222,44 @@ export async function startServer(options: { port?: number } = {}): Promise<void
   // Import legacy sidecar annotations
   importLegacySidecars(db);
 
-  // Background: count turns, then index for FTS
+  // Initialize embedding engine unless explicitly disabled
+  const embeddingsDisabled = !!process.env.GLOSS_NO_EMBEDDINGS;
+  let embeddingEngine: EmbeddingEngine | undefined;
+  let vectorIndex: VectorIndex | null = null;
+
+  if (!embeddingsDisabled) {
+    embeddingEngine = new EmbeddingEngine();
+
+    // Load existing embeddings into memory
+    try {
+      vectorIndex = VectorIndex.fromDb(db);
+      if (vectorIndex.count > 0) {
+        console.log(`Loaded ${vectorIndex.count} embeddings into vector index`);
+      }
+    } catch {
+      // first run, no embeddings yet
+    }
+  }
+
+  /** Kick off embedding backfill if engine is ready. */
+  const startEmbeddingBackfill = () => {
+    if (!embeddingEngine) return;
+    if (embeddingEngine.isReady()) {
+      backfillEmbeddings(db, embeddingEngine, vectorIndex);
+    } else {
+      // Wait for engine to load, then backfill
+      embeddingEngine.waitReady().then(() => {
+        backfillEmbeddings(db, embeddingEngine!, vectorIndex);
+      }).catch(() => {
+        // Model failed to load — skip embeddings entirely
+      });
+    }
+  };
+
+  // Background: count turns, then FTS, then embeddings
   setTimeout(() => {
     backfillTurnCounts(db);
-    setTimeout(() => backfillFtsIndex(db), 2000);
+    setTimeout(() => backfillFtsIndex(db, startEmbeddingBackfill), 2000);
   }, 500);
 
   // Periodic rescan
@@ -231,10 +267,10 @@ export async function startServer(options: { port?: number } = {}): Promise<void
     try {
       const freshSessions = scanProjectsDir();
       syncToDb(db, freshSessions);
-      // Backfill turns and FTS for any new sessions
+      // Backfill turns, FTS, then embeddings for any new sessions
       setTimeout(() => {
         backfillTurnCounts(db);
-        setTimeout(() => backfillFtsIndex(db), 2000);
+        setTimeout(() => backfillFtsIndex(db, startEmbeddingBackfill), 2000);
       }, 500);
     } catch {
       // best-effort
@@ -286,7 +322,7 @@ export async function startServer(options: { port?: number } = {}): Promise<void
 
       // API routes
       if (pathname.startsWith("/api/")) {
-        return handleApiRoute(req, pathname, db);
+        return handleApiRoute(req, pathname, db, { embeddingEngine, vectorIndex });
       }
 
       // Conversation page: /c/:sessionId
@@ -488,6 +524,7 @@ export async function handleApiRoute(
   req: Request,
   pathname: string,
   db: ConvoDb,
+  search?: { embeddingEngine?: EmbeddingEngine; vectorIndex?: VectorIndex | null },
 ): Promise<Response> {
   const jsonHeaders = { "Content-Type": "application/json; charset=utf-8" };
 
@@ -590,6 +627,8 @@ export async function handleApiRoute(
     const { askQuestion } = await import("./ask.js");
     const result = await askQuestion(db, q, {
       maxSources: (body.maxSources as number) ?? undefined,
+      vectorIndex: search?.vectorIndex ?? undefined,
+      embeddingEngine: search?.embeddingEngine,
     });
     return new Response(JSON.stringify(result), { headers: jsonHeaders });
   }
@@ -605,7 +644,10 @@ export async function handleApiRoute(
     }
     const { askQuestion } = await import("./ask.js");
     const { buildAskResultsHtml } = await import("./ask-page.js");
-    const result = await askQuestion(db, q);
+    const result = await askQuestion(db, q, {
+      vectorIndex: search?.vectorIndex ?? undefined,
+      embeddingEngine: search?.embeddingEngine,
+    });
     const html = buildAskResultsHtml(result);
     return new Response(html, {
       headers: { "Content-Type": "text/html; charset=utf-8" },

@@ -3,6 +3,7 @@ import * as os from "node:os";
 import type { ConvoDb } from "./db.js";
 import { IncrementalParser } from "./incremental-parser.js";
 import type { Turn } from "./types.js";
+import type { EmbeddingEngine, VectorIndex } from "./embeddings.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -21,7 +22,7 @@ export interface AskResult {
   query: string;
   answer: string;
   sources: AskSource[];
-  timing: { ftsMs: number; claudeMs: number; totalMs: number };
+  timing: { ftsMs: number; vectorMs: number; claudeMs: number; totalMs: number };
   error?: string;
 }
 
@@ -205,7 +206,12 @@ function searchMetadata(
 export async function askQuestion(
   db: ConvoDb,
   query: string,
-  options?: { maxSources?: number; contextTurns?: number },
+  options?: {
+    maxSources?: number;
+    contextTurns?: number;
+    vectorIndex?: VectorIndex;
+    embeddingEngine?: EmbeddingEngine;
+  },
 ): Promise<AskResult> {
   const t0 = performance.now();
   const maxSources = options?.maxSources ?? 6;
@@ -264,65 +270,93 @@ export async function askQuestion(
   const tFts = performance.now();
 
   // ------------------------------------------------------------------
-  // Merge & deduplicate with unified scoring
+  // Vector search (parallel to FTS, gracefully skipped if unavailable)
   // ------------------------------------------------------------------
-  // Combine all signals into a single score per session.
-  // FTS rank (negative, lower = better) is primary; metadata match adds a boost;
-  // match count breaks ties.
-  const metadataSet = new Set(metadataIds);
-  const sessionScores = new Map<string, { bestRank: number; totalHits: number; metadataBoost: boolean }>();
+  let vectorSessionRanking: Array<{
+    sessionId: string;
+    bestScore: number;
+    bestTurnIndex: number;
+    matchCount: number;
+  }> = [];
+  let vectorMs = 0;
 
+  if (options?.vectorIndex && options?.embeddingEngine?.isReady() && options.vectorIndex.count > 0) {
+    try {
+      const tVec0 = performance.now();
+      const queryVec = await options.embeddingEngine.embedQuery(query);
+      vectorSessionRanking = options.vectorIndex.searchSessions(queryVec, maxSources * 4);
+      vectorMs = Math.round(performance.now() - tVec0);
+      console.log(`[ask] Vector search: ${vectorSessionRanking.length} sessions in ${vectorMs}ms`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`[ask] Vector search error: ${msg}`);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // RRF merge: combine FTS, vector, and metadata signals
+  // ------------------------------------------------------------------
+  const RRF_K = 60;
+
+  // Build FTS session ranking (deduplicated, sorted by score)
+  const ftsSessionScores = new Map<string, { bestRank: number; totalHits: number }>();
   for (const h of sessionHits) {
     if (isExcluded(h.session_id)) continue;
-    const existing = sessionScores.get(h.session_id);
+    const existing = ftsSessionScores.get(h.session_id);
     if (existing) {
       if (h.best_rank < existing.bestRank) existing.bestRank = h.best_rank;
-      // Use max hit count across queries, not sum — avoids double-counting
-      // when the same session matches multiple extracted terms
       if (h.match_count > existing.totalHits) existing.totalHits = h.match_count;
     } else {
-      sessionScores.set(h.session_id, {
+      ftsSessionScores.set(h.session_id, {
         bestRank: h.best_rank,
         totalHits: h.match_count,
-        metadataBoost: metadataSet.has(h.session_id),
       });
     }
   }
-  // Add metadata-only sessions (no FTS hits) with a neutral rank
-  for (const id of metadataIds) {
-    if (!sessionScores.has(id) && !isExcluded(id)) {
-      sessionScores.set(id, { bestRank: 0, totalHits: 0, metadataBoost: true });
-    }
-  }
-
-  // Two-pass selection: first guarantee metadata matches get slots (they matched
-  // project name/title which is high-signal), then fill remaining slots by score.
-  // Score combines FTS rank with hit count: more hits = more relevant content.
-  function computeScore(s: { bestRank: number; totalHits: number; metadataBoost: boolean }): number {
-    const hitsBoost = s.totalHits > 1 ? Math.log2(s.totalHits) * 1.5 : 0;
-    return s.bestRank - hitsBoost;
-  }
-
-  const metadataEntries = [...sessionScores.entries()]
-    .filter(([, s]) => s.metadataBoost)
-    .sort((a, b) => computeScore(a[1]) - computeScore(b[1]));
-  const ftsEntries = [...sessionScores.entries()]
-    .filter(([, s]) => !s.metadataBoost)
-    .sort((a, b) => computeScore(a[1]) - computeScore(b[1]));
-
-  // Reserve up to half the slots for metadata, fill rest with FTS
-  const metadataSlots = Math.min(metadataEntries.length, Math.ceil(maxSources / 2));
-  const ftsSlots = maxSources - metadataSlots;
-
-  const selectedMeta = metadataEntries.slice(0, metadataSlots).map(([id]) => id);
-  const selectedFts = ftsEntries
-    .filter(([id]) => !selectedMeta.includes(id))
-    .slice(0, ftsSlots)
+  // Sort FTS sessions by rank (lower = better) with hit count tiebreak
+  const ftsRanked = [...ftsSessionScores.entries()]
+    .sort((a, b) => {
+      const ra = a[1].bestRank - (a[1].totalHits > 1 ? Math.log2(a[1].totalHits) * 1.5 : 0);
+      const rb = b[1].bestRank - (b[1].totalHits > 1 ? Math.log2(b[1].totalHits) * 1.5 : 0);
+      return ra - rb;
+    })
     .map(([id]) => id);
 
-  const finalSessionIds = [...selectedMeta, ...selectedFts];
+  // Build vector session ranking (already sorted by bestScore desc)
+  // Preserve bestTurnIndex for use in context loading
+  const vectorTurnHints = new Map<string, number>();
+  const vectorRanked: string[] = [];
+  for (const v of vectorSessionRanking) {
+    if (isExcluded(v.sessionId)) continue;
+    vectorRanked.push(v.sessionId);
+    vectorTurnHints.set(v.sessionId, v.bestTurnIndex);
+  }
 
-  console.log(`[ask] Selected ${finalSessionIds.length} sessions: ${metadataSlots} metadata + ${selectedFts.length} FTS`);
+  // Metadata ranking
+  const metadataRanked = metadataIds.filter((id) => !isExcluded(id));
+
+  // Compute RRF scores
+  const rrfScores = new Map<string, number>();
+  const allSessionIds = new Set([...ftsRanked, ...vectorRanked, ...metadataRanked]);
+
+  for (const id of allSessionIds) {
+    let score = 0;
+    const ftsPos = ftsRanked.indexOf(id);
+    if (ftsPos >= 0) score += 1 / (RRF_K + ftsPos + 1);
+    const vecPos = vectorRanked.indexOf(id);
+    if (vecPos >= 0) score += 1 / (RRF_K + vecPos + 1);
+    const metaPos = metadataRanked.indexOf(id);
+    if (metaPos >= 0) score += 1 / (RRF_K + metaPos + 1);
+    rrfScores.set(id, score);
+  }
+
+  // Select top N sessions by RRF score
+  const finalSessionIds = [...rrfScores.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, maxSources)
+    .map(([id]) => id);
+
+  console.log(`[ask] RRF selected ${finalSessionIds.length} sessions (FTS:${ftsRanked.length} Vec:${vectorRanked.length} Meta:${metadataRanked.length})`);
 
   // ------------------------------------------------------------------
   // 3. Load turn context
@@ -361,7 +395,15 @@ export async function askQuestion(
     ]);
     const keywords = [...allTerms];
     const matchingIndices: number[] = [];
+
+    // Prioritize the vector search's best turn if available
+    const vecHint = vectorTurnHints.get(sessionId);
+    if (vecHint !== undefined && vecHint >= 0 && vecHint < allTurns.length) {
+      matchingIndices.push(vecHint);
+    }
+
     for (let i = 0; i < allTurns.length; i++) {
+      if (i === vecHint) continue; // already added
       const text = turnToPlainText(allTurns[i]).toLowerCase();
       if (keywords.some((kw) => text.includes(kw))) {
         matchingIndices.push(i);
@@ -508,6 +550,7 @@ Use markdown formatting in your answer.`;
     sources,
     timing: {
       ftsMs: Math.round(tFts - t0),
+      vectorMs,
       claudeMs: Math.round(tEnd - tClaudeStart),
       totalMs: Math.round(tEnd - t0),
     },

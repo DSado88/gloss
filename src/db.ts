@@ -156,6 +156,28 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- Embedding vectors stored as BLOBs (256 x float32 = 1024 bytes each)
+CREATE TABLE IF NOT EXISTS turn_embeddings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  turn_index INTEGER NOT NULL,
+  role TEXT NOT NULL DEFAULT '',
+  text_hash TEXT NOT NULL,
+  embedding BLOB NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  UNIQUE(session_id, turn_index)
+);
+CREATE INDEX IF NOT EXISTS idx_turn_emb_session ON turn_embeddings(session_id);
+
+-- Track embedding indexing status per session (mirrors fts_status pattern)
+CREATE TABLE IF NOT EXISTS embedding_status (
+  session_id TEXT PRIMARY KEY,
+  indexed_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  turn_count INTEGER NOT NULL DEFAULT 0,
+  file_mtime INTEGER NOT NULL DEFAULT 0,
+  model_name TEXT NOT NULL DEFAULT 'snowflake-arctic-embed-m-v2.0'
+);
 `;
 
 // ---------------------------------------------------------------------------
@@ -657,6 +679,101 @@ export class ConvoDb {
   /** Set project path patterns excluded from AI search */
   setSearchExcludedProjects(patterns: string[]): void {
     this.setSetting("search_excluded_projects", patterns.join("\n"));
+  }
+
+  // ---- Embeddings ---------------------------------------------------------
+
+  /** Check if a session needs embedding (re)indexing based on file mtime. */
+  embeddingNeedsIndexing(sessionId: string, fileMtime: number): boolean {
+    const row = this.db.query("SELECT file_mtime FROM embedding_status WHERE session_id = ?").get(sessionId) as { file_mtime: number } | null;
+    if (!row) return true;
+    return fileMtime > row.file_mtime;
+  }
+
+  /** Store embeddings for a session's turns. Replaces any existing. */
+  storeEmbeddings(
+    sessionId: string,
+    entries: Array<{
+      turnIndex: number;
+      role: string;
+      textHash: string;
+      embedding: Float32Array;
+    }>,
+    fileMtime: number,
+  ): void {
+    this.db.exec("BEGIN");
+    try {
+      // Remove old embeddings for this session
+      this.db.run("DELETE FROM turn_embeddings WHERE session_id = ?", [sessionId]);
+
+      const insert = this.db.prepare(
+        "INSERT INTO turn_embeddings (session_id, turn_index, role, text_hash, embedding) VALUES (?, ?, ?, ?, ?)",
+      );
+      for (const entry of entries) {
+        const blob = Buffer.from(entry.embedding.buffer, entry.embedding.byteOffset, entry.embedding.byteLength);
+        insert.run(sessionId, entry.turnIndex, entry.role, entry.textHash, blob);
+      }
+
+      this.db.run(
+        "INSERT OR REPLACE INTO embedding_status (session_id, indexed_at, turn_count, file_mtime) VALUES (?, unixepoch(), ?, ?)",
+        [sessionId, entries.length, fileMtime],
+      );
+
+      this.db.exec("COMMIT");
+    } catch (e) {
+      this.db.exec("ROLLBACK");
+      throw e;
+    }
+  }
+
+  /** Remove all embeddings for a session. */
+  removeEmbeddings(sessionId: string): void {
+    this.db.run("DELETE FROM turn_embeddings WHERE session_id = ?", [sessionId]);
+    this.db.run("DELETE FROM embedding_status WHERE session_id = ?", [sessionId]);
+  }
+
+  /** Load all embeddings into memory. Returns arrays for VectorIndex construction. */
+  loadAllEmbeddings(): {
+    sessionIds: string[];
+    turnIndices: number[];
+    roles: string[];
+    embeddings: Float32Array[];
+  } {
+    const rows = this.db.query(
+      "SELECT session_id, turn_index, role, embedding FROM turn_embeddings ORDER BY session_id, turn_index",
+    ).all() as Array<{
+      session_id: string;
+      turn_index: number;
+      role: string;
+      embedding: Buffer;
+    }>;
+
+    const sessionIds: string[] = [];
+    const turnIndices: number[] = [];
+    const roles: string[] = [];
+    const embeddings: Float32Array[] = [];
+
+    const EXPECTED_BLOB_SIZE = 256 * 4; // 256 dims × 4 bytes per float32
+    for (const row of rows) {
+      const buf = row.embedding;
+      if (buf.byteLength !== EXPECTED_BLOB_SIZE) {
+        console.warn(`[db] Skipping corrupt embedding: session=${row.session_id} turn=${row.turn_index} (${buf.byteLength} bytes, expected ${EXPECTED_BLOB_SIZE})`);
+        continue;
+      }
+      sessionIds.push(row.session_id);
+      turnIndices.push(row.turn_index);
+      roles.push(row.role);
+      const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+      embeddings.push(new Float32Array(ab));
+    }
+
+    return { sessionIds, turnIndices, roles, embeddings };
+  }
+
+  /** Get count of sessions with embeddings. */
+  embeddingIndexedCount(): number {
+    const row = this.db.query("SELECT COUNT(*) as n FROM embedding_status").get() as { n: number };
+    return row.n;
   }
 
   // ---- Lifecycle ----------------------------------------------------------
