@@ -82,7 +82,7 @@ export function sanitizeFtsQuery(input: string): string {
 // Turn text extraction (for prompt building)
 // ---------------------------------------------------------------------------
 
-const MAX_TURN_CHARS = 1500;
+const MAX_TURN_CHARS = 1000;
 
 function turnToPlainText(turn: Turn): string {
   const parts: string[] = [];
@@ -135,7 +135,7 @@ async function extractSearchTerms(query: string): Promise<string[]> {
 
 Question: ${query}`;
 
-    const proc = Bun.spawn([claudeBin, "-p"], {
+    const proc = Bun.spawn([claudeBin, "-p", "--model", "sonnet"], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
@@ -208,8 +208,22 @@ export async function askQuestion(
   options?: { maxSources?: number; contextTurns?: number },
 ): Promise<AskResult> {
   const t0 = performance.now();
-  const maxSources = options?.maxSources ?? 5;
+  const maxSources = options?.maxSources ?? 6;
   const contextTurns = options?.contextTurns ?? 1;
+
+  // Load excluded project patterns (e.g. "think-tank*" excludes all think-tank variants)
+  const excludedPatterns = db.getSearchExcludedProjects();
+  function isExcluded(sessionId: string): boolean {
+    if (excludedPatterns.length === 0) return false;
+    const session = db.getSession(sessionId);
+    if (!session?.project) return false;
+    const proj = session.project.toLowerCase();
+    return excludedPatterns.some((pattern) => {
+      const p = pattern.toLowerCase();
+      if (p.endsWith("*")) return proj.includes(p.slice(0, -1));
+      return proj.includes(p);
+    });
+  }
 
   // ------------------------------------------------------------------
   // 1-3: Run metadata, FTS, and Claude extraction in parallel
@@ -225,7 +239,7 @@ export async function askQuestion(
   const ftsQuery = sanitizeFtsQuery(query);
   let sessionHits: Array<{ session_id: string; match_count: number; best_rank: number }> = [];
   try {
-    sessionHits = db.searchSessions(ftsQuery, maxSources * 2);
+    sessionHits = db.searchSessions(ftsQuery, maxSources * 4);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`[ask] FTS error for query "${ftsQuery}": ${msg}`);
@@ -242,7 +256,7 @@ export async function askQuestion(
     try {
       const sanitized = sanitizeFtsQuery(term);
       if (!sanitized) continue;
-      const hits = db.searchSessions(sanitized, maxSources);
+      const hits = db.searchSessions(sanitized, maxSources * 3);
       sessionHits.push(...hits);
     } catch { /* skip bad queries */ }
   }
@@ -250,31 +264,65 @@ export async function askQuestion(
   const tFts = performance.now();
 
   // ------------------------------------------------------------------
-  // Merge & deduplicate session IDs (metadata first, then FTS ranked)
+  // Merge & deduplicate with unified scoring
   // ------------------------------------------------------------------
-  const seen = new Set<string>();
-  const sessionIds: string[] = [];
+  // Combine all signals into a single score per session.
+  // FTS rank (negative, lower = better) is primary; metadata match adds a boost;
+  // match count breaks ties.
+  const metadataSet = new Set(metadataIds);
+  const sessionScores = new Map<string, { bestRank: number; totalHits: number; metadataBoost: boolean }>();
 
-  // Metadata matches get priority
-  for (const id of metadataIds) {
-    if (!seen.has(id)) { seen.add(id); sessionIds.push(id); }
-  }
-  // Then FTS hits, deduplicated and sorted by rank
-  const uniqueFts = new Map<string, { match_count: number; best_rank: number }>();
   for (const h of sessionHits) {
-    const existing = uniqueFts.get(h.session_id);
-    if (!existing || h.best_rank < existing.best_rank) {
-      uniqueFts.set(h.session_id, h);
+    if (isExcluded(h.session_id)) continue;
+    const existing = sessionScores.get(h.session_id);
+    if (existing) {
+      if (h.best_rank < existing.bestRank) existing.bestRank = h.best_rank;
+      // Use max hit count across queries, not sum — avoids double-counting
+      // when the same session matches multiple extracted terms
+      if (h.match_count > existing.totalHits) existing.totalHits = h.match_count;
+    } else {
+      sessionScores.set(h.session_id, {
+        bestRank: h.best_rank,
+        totalHits: h.match_count,
+        metadataBoost: metadataSet.has(h.session_id),
+      });
     }
   }
-  const sortedFts = [...uniqueFts.entries()]
-    .sort((a, b) => a[1].best_rank - b[1].best_rank);
-  for (const [id] of sortedFts) {
-    if (!seen.has(id)) { seen.add(id); sessionIds.push(id); }
+  // Add metadata-only sessions (no FTS hits) with a neutral rank
+  for (const id of metadataIds) {
+    if (!sessionScores.has(id) && !isExcluded(id)) {
+      sessionScores.set(id, { bestRank: 0, totalHits: 0, metadataBoost: true });
+    }
   }
 
-  // Cap total sources
-  const finalSessionIds = sessionIds.slice(0, maxSources);
+  // Two-pass selection: first guarantee metadata matches get slots (they matched
+  // project name/title which is high-signal), then fill remaining slots by score.
+  // Score combines FTS rank with hit count: more hits = more relevant content.
+  function computeScore(s: { bestRank: number; totalHits: number; metadataBoost: boolean }): number {
+    const hitsBoost = s.totalHits > 1 ? Math.log2(s.totalHits) * 1.5 : 0;
+    return s.bestRank - hitsBoost;
+  }
+
+  const metadataEntries = [...sessionScores.entries()]
+    .filter(([, s]) => s.metadataBoost)
+    .sort((a, b) => computeScore(a[1]) - computeScore(b[1]));
+  const ftsEntries = [...sessionScores.entries()]
+    .filter(([, s]) => !s.metadataBoost)
+    .sort((a, b) => computeScore(a[1]) - computeScore(b[1]));
+
+  // Reserve up to half the slots for metadata, fill rest with FTS
+  const metadataSlots = Math.min(metadataEntries.length, Math.ceil(maxSources / 2));
+  const ftsSlots = maxSources - metadataSlots;
+
+  const selectedMeta = metadataEntries.slice(0, metadataSlots).map(([id]) => id);
+  const selectedFts = ftsEntries
+    .filter(([id]) => !selectedMeta.includes(id))
+    .slice(0, ftsSlots)
+    .map(([id]) => id);
+
+  const finalSessionIds = [...selectedMeta, ...selectedFts];
+
+  console.log(`[ask] Selected ${finalSessionIds.length} sessions: ${metadataSlots} metadata + ${selectedFts.length} FTS`);
 
   // ------------------------------------------------------------------
   // 3. Load turn context
@@ -360,9 +408,9 @@ export async function askQuestion(
   }
 
   // ------------------------------------------------------------------
-  // 4. Build prompt (cap total excerpt size to ~30K chars)
+  // 4. Build prompt (cap total excerpt size to ~20K chars)
   // ------------------------------------------------------------------
-  const MAX_EXCERPT_CHARS = 30_000;
+  const MAX_EXCERPT_CHARS = 20_000;
   let totalChars = 0;
   const excerptParts: string[] = [];
 
@@ -410,7 +458,7 @@ Use markdown formatting in your answer.`;
       env.HOME = home;
       if (!env.PATH) env.PATH = `/usr/local/bin:/usr/bin:/bin:${home}/.local/bin`;
       const claudeBin = `${home}/.local/bin/claude`;
-      const proc = Bun.spawn([claudeBin, "-p"], {
+      const proc = Bun.spawn([claudeBin, "-p", "--model", "haiku"], {
         stdin: "pipe",
         stdout: "pipe",
         stderr: "pipe",
@@ -429,7 +477,7 @@ Use markdown formatting in your answer.`;
       const result = await Promise.race([
         stdoutPromise,
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("claude timed out after 60s")), CLAUDE_TIMEOUT_MS),
+          setTimeout(() => reject(new Error(`claude timed out after ${CLAUDE_TIMEOUT_MS / 1000}s`)), CLAUDE_TIMEOUT_MS),
         ),
       ]);
 

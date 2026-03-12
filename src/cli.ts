@@ -272,4 +272,45 @@ program
     db.close();
   });
 
+// ── Search exclusions ──
+program
+  .command("search-exclude")
+  .description("Manage projects excluded from AI search")
+  .argument("[action]", "add, remove, or list (default: list)")
+  .argument("[pattern]", "Project path pattern (e.g. 'think-tank' or 'think-tank*')")
+  .action(async (action?: string, pattern?: string) => {
+    const { openDb } = await import("./db.js");
+    const db = openDb();
+    const current = db.getSearchExcludedProjects();
+
+    if (!action || action === "list") {
+      if (current.length === 0) {
+        console.log("No projects excluded from search.");
+      } else {
+        console.log("Excluded project patterns:");
+        for (const p of current) console.log(`  ${p}`);
+      }
+    } else if (action === "add" && pattern) {
+      if (current.includes(pattern)) {
+        console.log(`Already excluded: ${pattern}`);
+      } else {
+        current.push(pattern);
+        db.setSearchExcludedProjects(current);
+        console.log(`Added: ${pattern}`);
+      }
+    } else if (action === "remove" && pattern) {
+      const idx = current.indexOf(pattern);
+      if (idx === -1) {
+        console.log(`Not found: ${pattern}`);
+      } else {
+        current.splice(idx, 1);
+        db.setSearchExcludedProjects(current);
+        console.log(`Removed: ${pattern}`);
+      }
+    } else {
+      console.log("Usage: search-exclude [add|remove|list] [pattern]");
+    }
+    db.close();
+  });
+
 program.parse();

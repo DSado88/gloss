@@ -256,6 +256,7 @@ export const CSS_STYLES = `
     overflow: hidden;
     border: 1px solid var(--border);
     background: var(--surface);
+    scroll-margin-top: 52px;
   }
 
   .turn.user {

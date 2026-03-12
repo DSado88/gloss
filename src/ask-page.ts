@@ -112,20 +112,16 @@ const ASK_CSS = `
   }
   .source-link:hover { text-decoration: underline; }
 
-  /* Source excerpts */
-  .source-excerpt {
-    font-size: 13px; line-height: 1.5; color: var(--text-muted);
-    padding: 4px 0; white-space: pre-wrap; word-break: break-word;
-  }
-  .source-excerpt + .source-excerpt {
-    border-top: 1px solid var(--border); margin-top: 4px; padding-top: 8px;
-  }
-  .excerpt-role {
-    font-size: 11px; font-weight: 600; text-transform: uppercase;
-    letter-spacing: 0.03em; margin-right: 6px;
-  }
-  .excerpt-human { color: var(--user-label); }
-  .excerpt-assistant { color: var(--assistant-label); }
+  /* Source turns — reuse main conversation turn styles */
+  .source-turns { display: flex; flex-direction: column; gap: 6px; }
+  .source-turns .turn { margin: 0; font-size: 13px; cursor: pointer; transition: opacity 0.15s; }
+  .source-turns .turn:hover { opacity: 0.8; }
+  .source-turns .turn-header { padding: 6px 12px; }
+  .source-turns .turn-body { padding: 2px 12px 10px; }
+  .source-turns .role-label { font-size: 11px; }
+  .source-turns .message-text { font-size: 13px; line-height: 1.55; }
+  .source-turns .message-text p { margin-bottom: 4px; }
+  .turn-link { text-decoration: none; color: inherit; display: block; }
 `;
 
 /**
@@ -286,25 +282,34 @@ export function buildAskResultsHtml(data: AskPageData): string {
     + (timing.ftsMs ? ` <span class="timing-detail">(FTS ${timing.ftsMs}ms` + (timing.claudeMs ? `, Claude ${timing.claudeMs}ms` : "") + `)</span>` : "")
     + `</div>`;
 
-  // Render each source as a compact card with text excerpts
+  // Render each source as a mini-conversation with the same turn styling as chat view
+  const MAX_SOURCE_TEXT = 400;
+
   const sourcesHtml = sources.map((source) => {
-    // Extract plain text snippets from turns (skip system prompts, keep it short)
-    const excerpts = source.turns
-      .filter((t) => t.role === "human" || t.role === "assistant")
-      .map((turn) => {
-        const role = turn.role === "human" ? "YOU" : "CLAUDE";
+    const turnCards = source.turns
+      .map((turn, j) => {
+        if (turn.role !== "human" && turn.role !== "assistant") return "";
+        const turnIndex = source.startTurnIndex + j;
+        const roleClass = turn.role === "human" ? "user" : "assistant";
+        const roleLabel = turn.role === "human" ? "YOU" : "CLAUDE";
         let text = "";
         for (const block of turn.blocks) {
           if (block.type === "text") text += block.text + "\n";
         }
         text = text.trim();
         if (!text) return "";
-        // Truncate to ~200 chars
-        const snippet = text.length > 200 ? text.slice(0, 200) + "..." : text;
-        return `<div class="source-excerpt"><span class="excerpt-role excerpt-${turn.role}">${role}</span> ${escape(snippet)}</div>`;
+        const snippet = text.length > MAX_SOURCE_TEXT
+          ? text.slice(0, MAX_SOURCE_TEXT) + "..."
+          : text;
+        const rendered = renderAnswerMarkdown(snippet);
+        const href = `/c/${source.sessionId}#turn-${turnIndex}`;
+        return `<a class="turn-link" href="${href}"><div class="turn ${roleClass}">
+          <div class="turn-header"><span class="role-label">${roleLabel}</span></div>
+          <div class="turn-body"><div class="message-text">${rendered}</div></div>
+        </div></a>`;
       })
       .filter(Boolean)
-      .slice(0, 3) // max 3 excerpts per source
+      .slice(0, 4)
       .join("\n");
 
     // Shorten project path: "/Users/david/Documents/Programs/foo" → "foo"
@@ -318,7 +323,7 @@ export function buildAskResultsHtml(data: AskPageData): string {
         <span class="source-project">${escape(projectName)}</span>${titleDisplay}
         <a class="source-link" href="/c/${source.sessionId}#turn-${source.matchTurnIndex}">${shortId}&hellip; &rarr;</a>
       </div>
-      ${excerpts}
+      <div class="source-turns">${turnCards}</div>
     </div>`;
   }).join("\n");
 

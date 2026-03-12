@@ -151,6 +151,11 @@ CREATE VIRTUAL TABLE IF NOT EXISTS conversation_fts USING fts5(
   content='',
   content_rowid='id'
 );
+
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 `;
 
 // ---------------------------------------------------------------------------
@@ -626,6 +631,32 @@ export class ConvoDb {
   ftsIndexedCount(): number {
     const row = this.db.query("SELECT COUNT(*) as n FROM fts_status").get() as { n: number };
     return row.n;
+  }
+
+  // ---- Settings -----------------------------------------------------------
+
+  getSetting(key: string): string | null {
+    const row = this.db.query("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | null;
+    return row?.value ?? null;
+  }
+
+  setSetting(key: string, value: string): void {
+    this.db.run(
+      "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      key, value,
+    );
+  }
+
+  /** Get project path patterns excluded from AI search (glob-style, one per line) */
+  getSearchExcludedProjects(): string[] {
+    const val = this.getSetting("search_excluded_projects");
+    if (!val) return [];
+    return val.split("\n").map(s => s.trim()).filter(Boolean);
+  }
+
+  /** Set project path patterns excluded from AI search */
+  setSearchExcludedProjects(patterns: string[]): void {
+    this.setSetting("search_excluded_projects", patterns.join("\n"));
   }
 
   // ---- Lifecycle ----------------------------------------------------------
