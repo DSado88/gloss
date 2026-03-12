@@ -30,6 +30,7 @@ Opens http://localhost:3456 — all your conversations from `~/.claude/projects/
 - **Live updates** via WebSocket — new turns appear as the JSONL grows
 - **Annotation API** — highlights persist in SQLite, sync across tabs
 - **Session discovery** — scans `~/.claude/projects/` on startup, rescans periodically
+- **AI-powered Ask** — natural language search across all conversations at `/ask`
 
 ### Viewer
 
@@ -57,6 +58,17 @@ Opens http://localhost:3456 — all your conversations from `~/.claude/projects/
 | **JSONL Slice** | Full turn text for annotated exchanges + their conversation partner | Raw material for further processing |
 | **Download** | Raw annotations JSON with all metadata and offsets | Backup, portability |
 
+### Ask (AI search)
+
+Type a question in the search bar on the index page to search across all your conversations. Under the hood:
+
+- **FTS5 full-text search** on indexed conversation content, combined with metadata matching on project names and session titles
+- **Claude-powered term extraction** (Sonnet) expands your question into multiple search queries
+- **Ranked results** using a unified scoring system that balances BM25 relevance with content density (`log2(hits)` boost)
+- **Answer synthesis** (Haiku) reads the top-scoring source turns and generates a direct answer with citations
+- **Source cards** display matching turns styled as conversation excerpts — click any turn to jump directly to that point in the conversation
+- **Project exclusion** filters out noisy automated sessions (configurable via `search-exclude` CLI command)
+
 ### Static export
 
 Self-contained HTML files with CSS/JS inlined — works via `file://` with no server needed.
@@ -70,13 +82,16 @@ bun src/cli.ts export -o output.html <session.jsonl>
 ## CLI
 
 ```
-bun src/cli.ts serve                 # Start the server (default)
-bun src/cli.ts serve --port 8080     # Custom port
-bun src/cli.ts export <file>         # Export to self-contained HTML
-bun src/cli.ts export -o out.html    # Custom output path
-bun src/cli.ts highlights --json     # Query highlights from SQLite
-bun src/cli.ts highlights --tags     # List all tags with counts
-bun src/cli.ts import                # Import sidecar .annotations.json files
+bun src/cli.ts serve                       # Start the server (default)
+bun src/cli.ts serve --port 8080           # Custom port
+bun src/cli.ts export <file>               # Export to self-contained HTML
+bun src/cli.ts export -o out.html          # Custom output path
+bun src/cli.ts highlights --json           # Query highlights from SQLite
+bun src/cli.ts highlights --tags           # List all tags with counts
+bun src/cli.ts import                      # Import sidecar .annotations.json files
+bun src/cli.ts search-exclude list         # Show excluded project patterns
+bun src/cli.ts search-exclude add "foo*"   # Exclude projects matching pattern
+bun src/cli.ts search-exclude remove "foo*"
 ```
 
 ## Slash Commands
@@ -111,8 +126,10 @@ Key modules:
 |------|------|
 | `src/server.ts` | Multi-session HTTP + WebSocket server |
 | `src/discovery.ts` | JSONL scanning and SQLite sync |
-| `src/db.ts` | SQLite schema, session/annotation CRUD |
-| `src/cli.ts` | CLI entry point (serve, export, highlights, import) |
+| `src/db.ts` | SQLite schema, session/annotation/settings CRUD |
+| `src/cli.ts` | CLI entry point (serve, export, highlights, search-exclude) |
+| `src/ask.ts` | AI-powered search: FTS, term extraction, answer synthesis |
+| `src/ask-page.ts` | Ask results page rendering (answer + source cards) |
 | `src/index-page.ts` | Server index page with search/filter/grouping |
 | `src/incremental-parser.ts` | Streaming JSONL parser for live updates |
 | `src/parser.ts` | Full JSONL-to-conversation parser |
