@@ -149,6 +149,7 @@ CREATE TABLE IF NOT EXISTS fts_status (
 CREATE VIRTUAL TABLE IF NOT EXISTS conversation_fts USING fts5(
   text,
   content='',
+  contentless_delete=1,
   content_rowid='id'
 );
 
@@ -596,7 +597,7 @@ export class ConvoDb {
     const rows = this.db.query("SELECT id FROM fts_map WHERE session_id = ?").all(sessionId) as { id: number }[];
     if (rows.length > 0) {
       for (const row of rows) {
-        this.db.run("INSERT INTO conversation_fts(conversation_fts, rowid, text) VALUES('delete', ?, '')", [row.id]);
+        this.db.run("DELETE FROM conversation_fts WHERE rowid = ?", [row.id]);
       }
       this.db.run("DELETE FROM fts_map WHERE session_id = ?", [sessionId]);
     }
@@ -823,6 +824,16 @@ export function openDb(dbPath?: string): ConvoDb {
   try { db.exec("ALTER TABLE sessions ADD COLUMN last_modified INTEGER"); } catch {}
   try { db.exec("ALTER TABLE sessions ADD COLUMN file_size INTEGER"); } catch {}
   try { db.exec("ALTER TABLE fts_status ADD COLUMN file_mtime INTEGER NOT NULL DEFAULT 0"); } catch {}
+
+  // Migrate FTS to contentless_delete=1 if needed (fixes ghost entry bug)
+  try {
+    const ftsInfo = db.query("SELECT sql FROM sqlite_master WHERE name = 'conversation_fts'").get() as { sql: string } | null;
+    if (ftsInfo?.sql && !ftsInfo.sql.includes("contentless_delete")) {
+      db.exec("DROP TABLE IF EXISTS conversation_fts");
+      db.exec("CREATE VIRTUAL TABLE conversation_fts USING fts5(text, content='', contentless_delete=1, content_rowid='id')");
+      db.exec("DELETE FROM fts_status"); // Force re-index on next backfill
+    }
+  } catch {}
 
   return new ConvoDb(db);
 }

@@ -687,4 +687,53 @@ describe("ConvoDb", () => {
       expect(session!.project).toBe("/my/project");
     });
   });
+
+  // -----------------------------------------------------------------------
+  // Bug #5: FTS ghost entries via broken contentless delete
+  // -----------------------------------------------------------------------
+
+  describe("FTS ghost entries", () => {
+    it("removeFtsIndex does not leave ghost tokens in FTS inverted index", () => {
+      db.upsertSession({ id: "ghost-test" });
+      db.indexSession("ghost-test", [{ role: "user", text: "unique_ghost_xylophone" }], 100);
+
+      // Verify it's searchable via the JOIN path
+      expect(db.searchSessions("unique_ghost_xylophone", 10).length).toBe(1);
+
+      // Remove the FTS index
+      db.removeFtsIndex("ghost-test");
+
+      // Query FTS directly (bypass fts_map JOIN) — ghost tokens would still match
+      const ghosts = db.db.query(
+        "SELECT rowid FROM conversation_fts WHERE conversation_fts MATCH 'unique_ghost_xylophone'",
+      ).all();
+
+      // Ghost entries should be gone from the FTS inverted index
+      expect(ghosts.length).toBe(0);
+    });
+
+    it("re-indexing does not accumulate ghost tokens", () => {
+      db.upsertSession({ id: "reindex-ghost" });
+
+      // Index, then re-index with different text 3 times
+      db.indexSession("reindex-ghost", [{ role: "user", text: "phantom_alpha" }], 100);
+      db.indexSession("reindex-ghost", [{ role: "user", text: "phantom_beta" }], 200);
+      db.indexSession("reindex-ghost", [{ role: "user", text: "phantom_gamma" }], 300);
+
+      // Only "phantom_gamma" should exist in the FTS inverted index
+      const alphaGhosts = db.db.query(
+        "SELECT rowid FROM conversation_fts WHERE conversation_fts MATCH 'phantom_alpha'",
+      ).all();
+      const betaGhosts = db.db.query(
+        "SELECT rowid FROM conversation_fts WHERE conversation_fts MATCH 'phantom_beta'",
+      ).all();
+      const gammaHits = db.db.query(
+        "SELECT rowid FROM conversation_fts WHERE conversation_fts MATCH 'phantom_gamma'",
+      ).all();
+
+      expect(alphaGhosts.length).toBe(0);
+      expect(betaGhosts.length).toBe(0);
+      expect(gammaHits.length).toBe(1);
+    });
+  });
 });

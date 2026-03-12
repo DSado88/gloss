@@ -111,6 +111,27 @@ function turnToPlainText(turn: Turn): string {
 }
 
 // ---------------------------------------------------------------------------
+// FTS hit merging
+// ---------------------------------------------------------------------------
+
+/** Merge duplicate session hits from multiple FTS queries. Keeps best rank and sums hit counts. */
+export function mergeFtsHits(
+  sessionHits: Array<{ session_id: string; match_count: number; best_rank: number }>,
+): Map<string, { bestRank: number; totalHits: number }> {
+  const scores = new Map<string, { bestRank: number; totalHits: number }>();
+  for (const h of sessionHits) {
+    const existing = scores.get(h.session_id);
+    if (existing) {
+      if (h.best_rank < existing.bestRank) existing.bestRank = h.best_rank;
+      existing.totalHits += h.match_count;
+    } else {
+      scores.set(h.session_id, { bestRank: h.best_rank, totalHits: h.match_count });
+    }
+  }
+  return scores;
+}
+
+// ---------------------------------------------------------------------------
 // Main pipeline
 // ---------------------------------------------------------------------------
 
@@ -122,6 +143,7 @@ const CLAUDE_TIMEOUT_MS = 60_000;
 // ---------------------------------------------------------------------------
 
 async function extractSearchTerms(query: string): Promise<string[]> {
+  let proc: ReturnType<typeof Bun.spawn> | undefined;
   try {
     const home = process.env.HOME || os.homedir();
     const env: Record<string, string> = {};
@@ -136,7 +158,7 @@ async function extractSearchTerms(query: string): Promise<string[]> {
 
 Question: ${query}`;
 
-    const proc = Bun.spawn([claudeBin, "-p", "--model", "sonnet"], {
+    proc = Bun.spawn([claudeBin, "-p", "--model", "sonnet"], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
@@ -160,6 +182,7 @@ Question: ${query}`;
       .map((l) => l.trim().replace(/^[-*\d.]+\s*/, ""))
       .filter((l) => l.length > 1 && l.length < 60);
   } catch {
+    proc?.kill();
     return [];
   }
 }
@@ -299,20 +322,8 @@ export async function askQuestion(
   const RRF_K = 60;
 
   // Build FTS session ranking (deduplicated, sorted by score)
-  const ftsSessionScores = new Map<string, { bestRank: number; totalHits: number }>();
-  for (const h of sessionHits) {
-    if (isExcluded(h.session_id)) continue;
-    const existing = ftsSessionScores.get(h.session_id);
-    if (existing) {
-      if (h.best_rank < existing.bestRank) existing.bestRank = h.best_rank;
-      if (h.match_count > existing.totalHits) existing.totalHits = h.match_count;
-    } else {
-      ftsSessionScores.set(h.session_id, {
-        bestRank: h.best_rank,
-        totalHits: h.match_count,
-      });
-    }
-  }
+  const filteredHits = sessionHits.filter((h) => !isExcluded(h.session_id));
+  const ftsSessionScores = mergeFtsHits(filteredHits);
   // Sort FTS sessions by rank (lower = better) with hit count tiebreak
   const ftsRanked = [...ftsSessionScores.entries()]
     .sort((a, b) => {
@@ -490,6 +501,7 @@ Use markdown formatting in your answer.`;
   const tClaudeStart = performance.now();
 
   if (sources.length > 0) {
+    let proc: ReturnType<typeof Bun.spawn> | undefined;
     try {
       // Unset CLAUDECODE to avoid nested session detection, ensure HOME/PATH
       const home = process.env.HOME || os.homedir();
@@ -500,7 +512,7 @@ Use markdown formatting in your answer.`;
       env.HOME = home;
       if (!env.PATH) env.PATH = `/usr/local/bin:/usr/bin:/bin:${home}/.local/bin`;
       const claudeBin = `${home}/.local/bin/claude`;
-      const proc = Bun.spawn([claudeBin, "-p", "--model", "haiku"], {
+      proc = Bun.spawn([claudeBin, "-p", "--model", "haiku"], {
         stdin: "pipe",
         stdout: "pipe",
         stderr: "pipe",
@@ -533,6 +545,7 @@ Use markdown formatting in your answer.`;
         if (!answer) answer = "";
       }
     } catch (e) {
+      proc?.kill();
       claudeError = e instanceof Error ? e.message : String(e);
     }
   } else {

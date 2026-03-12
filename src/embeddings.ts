@@ -34,6 +34,8 @@ export class EmbeddingEngine {
       this.resolveReady = resolve;
       this.rejectReady = reject;
     });
+    // Prevent unhandled rejection crash when no one calls waitReady()
+    this.readyPromise.catch(() => {});
 
     // Allow users to opt out on constrained machines
     if (process.env.GLOSS_NO_EMBEDDINGS) {
@@ -144,13 +146,14 @@ export class EmbeddingEngine {
 // Vector math helpers
 // ---------------------------------------------------------------------------
 
-/** Truncate to EMBEDDING_DIMS and L2-normalize. */
-function truncateAndNormalize(vec: number[]): Float32Array {
+/** Truncate to EMBEDDING_DIMS and L2-normalize. @internal exported for testing. */
+export function truncateAndNormalize(vec: number[]): Float32Array {
   const out = new Float32Array(EMBEDDING_DIMS);
   let norm = 0;
   for (let i = 0; i < EMBEDDING_DIMS; i++) {
-    out[i] = vec[i];
-    norm += vec[i] * vec[i];
+    const v = i < vec.length ? vec[i] : 0;
+    out[i] = v;
+    norm += v * v;
   }
   norm = Math.sqrt(norm);
   if (norm > 0) {
@@ -178,7 +181,7 @@ export interface VectorSearchResult {
   sessionId: string;
   turnIndex: number;
   role: string;
-  score: number; // cosine similarity, 0-1
+  score: number; // cosine similarity, -1..1 (vectors are L2-normalized, so dot = cosine)
 }
 
 // ---------------------------------------------------------------------------
@@ -327,6 +330,7 @@ export class VectorIndex {
   /**
    * Aggregate turn-level results to session-level.
    * Returns sessions ranked by their best turn's score.
+   * Aggregates during the O(N) scan to avoid session starvation.
    */
   searchSessions(
     queryVector: Float32Array,
@@ -337,27 +341,32 @@ export class VectorIndex {
     bestTurnIndex: number;
     matchCount: number;
   }> {
-    // Get more turn-level results to ensure good session coverage
-    const turnResults = this.search(queryVector, topK * 5);
+    if (this._count === 0) return [];
 
-    // Aggregate by session
+    // Aggregate per-session during the full scan — guarantees every session
+    // is considered, regardless of how many turns any single session has.
     const sessionMap = new Map<
       string,
       { bestScore: number; bestTurnIndex: number; matchCount: number }
     >();
 
-    for (const r of turnResults) {
-      const existing = sessionMap.get(r.sessionId);
+    for (let i = 0; i < this._count; i++) {
+      const offset = i * EMBEDDING_DIMS;
+      const vec = this.vectors.subarray(offset, offset + EMBEDDING_DIMS);
+      const score = dot(queryVector, vec);
+
+      const sessionId = this.sessionIds[i];
+      const existing = sessionMap.get(sessionId);
       if (existing) {
         existing.matchCount++;
-        if (r.score > existing.bestScore) {
-          existing.bestScore = r.score;
-          existing.bestTurnIndex = r.turnIndex;
+        if (score > existing.bestScore) {
+          existing.bestScore = score;
+          existing.bestTurnIndex = this.turnIndices[i];
         }
       } else {
-        sessionMap.set(r.sessionId, {
-          bestScore: r.score,
-          bestTurnIndex: r.turnIndex,
+        sessionMap.set(sessionId, {
+          bestScore: score,
+          bestTurnIndex: this.turnIndices[i],
           matchCount: 1,
         });
       }
