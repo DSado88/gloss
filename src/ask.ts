@@ -34,7 +34,7 @@ const QUESTION_WORDS = new Set([
   "is", "are", "was", "were", "do", "does", "did",
   "can", "could", "would", "should", "will",
   "the", "a", "an", "in", "on", "at", "to", "for", "of", "with",
-  "i", "me", "my", "it", "its", "this", "that",
+  "i", "me", "my", "we", "us", "our", "it", "its", "this", "that",
 ]);
 
 /** FTS5 special characters that need stripping. */
@@ -45,20 +45,37 @@ const FTS5_SPECIAL = /[":*^~(){}[\]<>+\-!|&\\]/g;
  * Strips question words, punctuation, and special chars, then joins
  * remaining tokens with implicit AND (space-separated in FTS5).
  */
+/** Common filler words beyond question words */
+const FILLER_WORDS = new Set([
+  "lets", "let", "about", "all", "both", "and", "or", "but",
+  "just", "also", "very", "really", "some", "any", "every",
+  "everything", "anything", "something", "nothing",
+  "relevant", "related", "important", "please", "need", "want",
+  "gather", "find", "show", "give", "get", "tell", "look",
+]);
+
 export function sanitizeFtsQuery(input: string): string {
-  const stripped = input.replace(FTS5_SPECIAL, " ");
-  const tokens = stripped
+  const stripped = input.replace(FTS5_SPECIAL, " ").replace(/[.,;:!?]/g, " ");
+  let tokens = stripped
     .toLowerCase()
     .split(/\s+/)
-    .filter((t) => t.length > 1 && !QUESTION_WORDS.has(t));
+    .filter((t) => t.length > 1 && !QUESTION_WORDS.has(t) && !FILLER_WORDS.has(t));
 
   if (tokens.length === 0) {
-    // Fallback: use any non-trivial words from original
-    const fallback = stripped.split(/\s+/).filter((t) => t.length > 1);
-    return fallback.join(" ") || input.replace(/[^a-zA-Z0-9\s]/g, "").trim();
+    // Fallback: use any non-trivial words from original (skip question words only)
+    tokens = stripped.toLowerCase().split(/\s+/)
+      .filter((t) => t.length > 1 && !QUESTION_WORDS.has(t));
+    if (tokens.length === 0) {
+      return input.replace(/[^a-zA-Z0-9\s]/g, "").trim();
+    }
   }
 
-  return tokens.join(" ");
+  // For short queries (1-3 tokens), use implicit AND (all must match)
+  // For longer queries, use OR to be more permissive
+  if (tokens.length <= 3) {
+    return tokens.join(" ");
+  }
+  return tokens.join(" OR ");
 }
 
 // ---------------------------------------------------------------------------
