@@ -599,6 +599,57 @@ document.addEventListener('mousedown', (e) => {
 });
 
 // ── Export ──
+const exportSelected = new Set(); // IDs selected for export; empty = all selected
+
+function toggleSelectAll() {
+  const ids = sortedAnnotationIds();
+  if (exportSelected.size === ids.length) {
+    exportSelected.clear(); // all selected means "all" (empty set = all)
+  } else if (exportSelected.size === 0) {
+    // Currently "all" — deselect all
+    ids.forEach(id => exportSelected.add(id));
+    // Then clear to toggle: actually let's make it explicit
+    // empty = all, so to deselect: put a sentinel
+    exportSelected.clear();
+    exportSelected.add('__none__');
+  } else {
+    exportSelected.clear(); // back to all
+  }
+  buildExport();
+}
+
+function toggleExportItem(id, ev) {
+  if (ev) ev.stopPropagation();
+  // If set is empty (meaning all selected), populate it with all then remove this one
+  if (exportSelected.size === 0) {
+    sortedAnnotationIds().forEach(i => exportSelected.add(i));
+    exportSelected.delete(id);
+  } else if (exportSelected.has('__none__')) {
+    exportSelected.clear();
+    exportSelected.add(id);
+  } else if (exportSelected.has(id)) {
+    exportSelected.delete(id);
+    if (exportSelected.size === 0) exportSelected.add('__none__');
+  } else {
+    exportSelected.add(id);
+    // If all are now selected, clear to "all" state
+    if (exportSelected.size === sortedAnnotationIds().length) exportSelected.clear();
+  }
+  buildExport();
+}
+
+function selectedIds() {
+  const ids = sortedAnnotationIds();
+  if (exportSelected.size === 0) return ids; // empty = all
+  if (exportSelected.has('__none__')) return [];
+  return ids.filter(id => exportSelected.has(id));
+}
+
+function isExportSelected(id) {
+  if (exportSelected.size === 0) return true; // all
+  return exportSelected.has(id) && !exportSelected.has('__none__');
+}
+
 function toggleExport() {
   const panel = document.getElementById('export-panel');
   const isVisible = panel.classList.toggle('visible');
@@ -626,20 +677,27 @@ function buildExport() {
     return;
   }
 
-  list.innerHTML = ids.map(id => {
+  const selCount = selectedIds().length;
+  const allChecked = exportSelected.size === 0;
+  const selectBar = \`<div class="hl-select-bar"><label class="hl-select-all"><input type="checkbox" \${allChecked ? 'checked' : ''} onchange="toggleSelectAll()"> Select all<\\/label><span class="hl-select-count">\${selCount} of \${ids.length} selected<\\/span><\\/div>\`;
+
+  const items = ids.map(id => {
     const ann = annotations[id];
+    const checked = isExportSelected(id);
     const quote = (ann.text || '').replace(/\\n/g, ' ').slice(0, 200);
     const comment = ann.comment ? \`<div class="hl-item-comment">\${ann.comment}<\\/div>\` : '';
     const time = ann.time ? \`<span class="hl-item-time">\${ann.time}<\\/span>\` : '';
     const kindBadge = (ann.kind && ann.kind !== 'highlight') ? \`<span class="hl-kind-badge">\${ann.kind}<\\/span>\` : '';
     const tagsHtml = (ann.tags && ann.tags.length) ? \`<div class="hl-item-tags">\${ann.tags.map(t => \`<span class="hl-tag">\${t}<\\/span>\`).join('')}<\\/div>\` : '';
-    return \`<div class="hl-item" onclick="scrollToHighlight('\${id}')" onmouseenter="hoverHighlight('\${id}',true)" onmouseleave="hoverHighlight('\${id}',false)">
-      <div class="hl-item-header"><span class="hl-item-role">\${ann.role || '?'}\${kindBadge}<\\/span><span style="display:flex;align-items:center;gap:6px">\${time}<button class="hl-delete" onclick="event.stopPropagation();removeAnnotation('\${id}')" title="Delete highlight">&times;<\\/button><\\/span><\\/div>
+    return \`<div class="hl-item\${checked ? '' : ' hl-deselected'}" onclick="scrollToHighlight('\${id}')" onmouseenter="hoverHighlight('\${id}',true)" onmouseleave="hoverHighlight('\${id}',false)">
+      <div class="hl-item-header"><span style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="hl-checkbox" \${checked ? 'checked' : ''} onclick="toggleExportItem('\${id}',event)"><span class="hl-item-role">\${ann.role || '?'}\${kindBadge}<\\/span><\\/span><span style="display:flex;align-items:center;gap:6px">\${time}<button class="hl-delete" onclick="event.stopPropagation();removeAnnotation('\${id}')" title="Delete highlight">&times;<\\/button><\\/span><\\/div>
       <div class="hl-item-text">\${quote}<\\/div>
       \${comment}
       \${tagsHtml}
     <\\/div>\`;
   }).join('');
+
+  list.innerHTML = selectBar + items;
 }
 
 function scrollToHighlight(id) {
@@ -705,7 +763,7 @@ function fullQuote(ann) {
 
 // ── Copy for Claude (XML context bundle) ──
 function copyXmlExport(btn) {
-  const ids = sortedAnnotationIds();
+  const ids = selectedIds();
   if (!ids.length) return;
 
   const source = JSONL_SOURCE.split('/').pop() || SESSION_ID;
@@ -747,7 +805,7 @@ function copyXmlExport(btn) {
 
 // ── Copy Markdown ──
 function copyMarkdownExport(btn) {
-  const ids = sortedAnnotationIds();
+  const ids = selectedIds();
   if (!ids.length) return;
 
   const title = document.querySelector('.header h1')?.textContent || 'Conversation';
@@ -776,7 +834,7 @@ function copyMarkdownExport(btn) {
 
 // ── Copy JSONL Slice (exchange windows) ──
 function copyJsonlSlice(btn) {
-  const ids = sortedAnnotationIds();
+  const ids = selectedIds();
   if (!ids.length) return;
 
   const turnIndices = new Set();
@@ -825,7 +883,10 @@ function copyJsonlSlice(btn) {
 
 // ── Download annotations JSON (for bake-in) ──
 function downloadAnnotations() {
-  const data = JSON.stringify(annotations, null, 2);
+  const ids = selectedIds();
+  const subset = {};
+  ids.forEach(id => { if (annotations[id]) subset[id] = annotations[id]; });
+  const data = JSON.stringify(subset, null, 2);
   const blob = new Blob([data], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

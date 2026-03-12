@@ -924,6 +924,28 @@ export const CSS_STYLES = `
     overflow: auto;
     padding: 8px;
   }
+  .hl-select-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    font-size: 12px;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 4px;
+  }
+  .hl-select-all {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .hl-select-count { font-size: 11px; }
+  .hl-checkbox {
+    cursor: pointer;
+    accent-color: var(--accent);
+  }
   .hl-item {
     padding: 8px 12px;
     border-radius: 6px;
@@ -931,8 +953,9 @@ export const CSS_STYLES = `
     margin-bottom: 4px;
     border-left: 3px solid var(--accent);
     background: var(--bg);
-    transition: background 0.1s;
+    transition: background 0.1s, opacity 0.15s;
   }
+  .hl-item.hl-deselected { opacity: 0.4; }
   .hl-item:hover { background: var(--tab-hover); }
   .hl-delete {
     background: none; border: none; color: var(--text-tertiary); cursor: pointer;
