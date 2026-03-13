@@ -93,7 +93,9 @@ export class EmbeddingEngine {
 
       // Handle subprocess exit
       this.subprocess.exited.then((code) => {
-        if (!this.loaded && !this.failed) {
+        this.loaded = false;
+        this.subprocessReady = false;
+        if (!this.failed) {
           this.failed = true;
           this.rejectReady(new Error(`Embedding subprocess exited with code ${code}`));
         }
@@ -103,7 +105,6 @@ export class EmbeddingEngine {
         }
         this.pending.clear();
         this.subprocess = null;
-        this.subprocessReady = false;
       });
     } catch (err) {
       this.failed = true;
@@ -175,8 +176,13 @@ export class EmbeddingEngine {
       const promise = new Promise<Float32Array[]>((resolve, reject) => {
         this.pending.set(id, { resolve, reject });
       });
-      const msg = JSON.stringify({ id, texts }) + "\n";
-      this.subprocess.stdin.write(msg);
+      try {
+        this.subprocess.stdin.write(JSON.stringify({ id, texts }) + "\n");
+      } catch (err) {
+        this.pending.delete(id);
+        this.subprocessReady = false;
+        throw new Error("Embedding subprocess stdin write failed");
+      }
       return promise;
     }
     throw new Error("Embedding subprocess not available");
