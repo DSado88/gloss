@@ -404,15 +404,27 @@ export async function askQuestion(
 
   console.log(`[ask] Initial selection (pre-Claude terms): ${initialSessionIds.length} sessions`);
 
+  // Helper: load contexts in batches to limit concurrent memory usage
+  // With MAX_FILE_SIZE=200MB, unbounded parallelism could cause 1.2GB+ allocations
+  async function loadContextBatch(ids: string[], keywords: string[], concurrency = 3): Promise<AskSource[]> {
+    const results: AskSource[] = [];
+    for (let i = 0; i < ids.length; i += concurrency) {
+      const batch = ids.slice(i, i + concurrency);
+      const batchResults = await Promise.all(
+        batch.map((id) => loadSessionContext(id, keywords)),
+      );
+      results.push(...batchResults.flat());
+    }
+    return results;
+  }
+
   // ------------------------------------------------------------------
   // 4. Start context loading in PARALLEL with Claude term extraction
   // ------------------------------------------------------------------
   // Use FTS-only keywords for initial context matching (Claude terms not ready yet)
   const ftsKeywords = ftsQuery.toLowerCase().split(/\s+/).filter((t) => t !== "OR" && t.length > 1);
 
-  const contextPromise = Promise.all(
-    initialSessionIds.map((id) => loadSessionContext(id, ftsKeywords)),
-  );
+  const contextPromise = loadContextBatch(initialSessionIds, ftsKeywords);
 
   // ------------------------------------------------------------------
   // 5. Await Claude terms (likely already resolved by now, ~10s elapsed)
@@ -426,8 +438,8 @@ export async function askQuestion(
   // ------------------------------------------------------------------
   // 6. Await initial context loading
   // ------------------------------------------------------------------
-  const initialSourceArrays = await contextPromise;
-  const sources: AskSource[] = initialSourceArrays.flat();
+  const initialSources = await contextPromise;
+  let sources: AskSource[] = initialSources;
 
   // ------------------------------------------------------------------
   // 7. Check if Claude terms reveal additional sessions not in initial set
@@ -458,6 +470,10 @@ export async function askQuestion(
     }
 
     const finalSessionIds = selectTopSessions(fullScores, metadataIds, maxSources);
+    const finalSet = new Set(finalSessionIds);
+
+    // Prune sources for sessions that dropped out of the final ranking
+    sources = sources.filter((s) => finalSet.has(s.sessionId));
 
     // Find NEW sessions that Claude terms surfaced (not in initial set)
     const newSessionIds = finalSessionIds.filter((id) => !initialSet.has(id));
@@ -472,11 +488,9 @@ export async function askQuestion(
       ];
       const uniqueKeywords = [...new Set(allKeywords)];
 
-      // Load additional contexts in parallel
-      const additionalSourceArrays = await Promise.all(
-        newSessionIds.map((id) => loadSessionContext(id, uniqueKeywords)),
-      );
-      sources.push(...additionalSourceArrays.flat());
+      // Load additional contexts with concurrency limit
+      const additionalSources = await loadContextBatch(newSessionIds, uniqueKeywords);
+      sources.push(...additionalSources);
     }
 
     console.log(`[ask] Final selection: ${finalSessionIds.length} sessions (${initialSessionIds.length} initial + ${newSessionIds.length} new)`);
