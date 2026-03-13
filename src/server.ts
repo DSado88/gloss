@@ -245,15 +245,16 @@ export async function startServer(options: { port?: number } = {}): Promise<void
           // Changes found — reset to fast scan
           rescanIntervalMs = RESCAN_MIN_MS;
           console.log(`[discovery] ${changedCount} changed, next rescan in ${Math.round(rescanIntervalMs / 1000)}s`);
-
-          // Only run backfills when changes detected
-          setTimeout(() => {
-            backfillTurnCounts(db);
-            setTimeout(() => {
-              backfillFtsIndex(db);
-            }, 2000);
-          }, 500);
         }
+
+        // Always run backfills — they self-check internally and no-op if nothing needs indexing.
+        // This ensures incomplete backfills from a prior restart are eventually caught up.
+        setTimeout(() => {
+          backfillTurnCounts(db);
+          setTimeout(() => {
+            backfillFtsIndex(db);
+          }, 2000);
+        }, 500);
       } catch (err) {
         console.error("[discovery] Rescan error:", err);
       }

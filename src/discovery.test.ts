@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { scanProjectsDir, syncToDb, type DiscoveredSession, type ScanResult } from "./discovery.js";
+import { scanProjectsDir, syncToDb, clearDiscoveryCache, type DiscoveredSession, type ScanResult } from "./discovery.js";
 import { openDb, type ConvoDb } from "./db.js";
 
 function makeTempDir(): string {
@@ -34,6 +34,7 @@ describe("discovery", () => {
   let tempDir: string;
 
   beforeEach(() => {
+    clearDiscoveryCache();
     tempDir = makeTempDir();
   });
 

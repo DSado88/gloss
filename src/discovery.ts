@@ -22,6 +22,11 @@ export interface ScanResult {
 /** Cache of previously discovered sessions, keyed by JSONL path. */
 const discoveryCache = new Map<string, { mtimeMs: number; session: DiscoveredSession }>();
 
+/** Clear the discovery cache (useful for tests). */
+export function clearDiscoveryCache(): void {
+  discoveryCache.clear();
+}
+
 /**
  * Recursively find all *.jsonl files under a directory,
  * excluding subagents/ directories.
@@ -109,8 +114,12 @@ export function scanProjectsDir(
   }
 
   // Clean up cache entries for deleted files
+  let deletedCount = 0;
   for (const [cachedPath] of discoveryCache) {
-    if (!currentPaths.has(cachedPath)) discoveryCache.delete(cachedPath);
+    if (!currentPaths.has(cachedPath)) {
+      discoveryCache.delete(cachedPath);
+      deletedCount++;
+    }
   }
 
   // Deduplicate: same session UUID can appear in multiple project dirs
@@ -123,7 +132,7 @@ export function scanProjectsDir(
     }
   }
 
-  return { sessions: Array.from(byId.values()), changedCount };
+  return { sessions: Array.from(byId.values()), changedCount: changedCount + deletedCount };
 }
 
 /**
