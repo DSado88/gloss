@@ -26,6 +26,23 @@ export interface AskResult {
   error?: string;
 }
 
+/** Lightweight source info for streaming to the client */
+export interface StreamSourceInfo {
+  num: number;
+  sessionId: string;
+  project: string;
+  title: string;
+  matchTurnIndex: number;
+  startTurnIndex: number;
+  turns: Array<{ role: string; index: number; text: string }>;
+}
+
+export type AskStreamEvent =
+  | { type: "sources"; sources: StreamSourceInfo[]; timing: { ftsMs: number; vectorMs: number } }
+  | { type: "chunk"; text: string }
+  | { type: "done"; timing: { ftsMs: number; vectorMs: number; claudeMs: number; totalMs: number } }
+  | { type: "error"; message: string };
+
 // ---------------------------------------------------------------------------
 // FTS query sanitizer
 // ---------------------------------------------------------------------------
@@ -147,60 +164,49 @@ export function mergeFtsHits(
 }
 
 // ---------------------------------------------------------------------------
+// Local keyword extraction (replaces slow Claude shell-out)
+// ---------------------------------------------------------------------------
+
+/** Technical term patterns: CamelCase, UPPER_CASE, dot.notation, hyphenated-terms */
+const TECHNICAL_TERM_RE = /\b(?:[A-Z][a-z]+(?:[A-Z][a-z]+)+|[A-Z]{2,}(?:_[A-Z]+)*|[a-z]+(?:\.[a-z]+)+|[a-z]+-[a-z]+-?[a-z]*)\b/g;
+
+/**
+ * Extract search keywords from a natural-language query using local heuristics.
+ * Returns FTS tokens + technical terms (CamelCase, acronyms, dot-notation).
+ * Zero latency — no external calls.
+ */
+function extractLocalTerms(query: string, ftsTokens: string[]): string[] {
+  const terms = new Set(ftsTokens);
+
+  // Extract technical terms the FTS tokenizer might miss
+  const techMatches = query.match(TECHNICAL_TERM_RE) || [];
+  for (const t of techMatches) {
+    // Split CamelCase into parts too (e.g., "WebSocket" → "websocket", "web", "socket")
+    const lower = t.toLowerCase();
+    terms.add(lower);
+    const parts = t.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().split(/[\s_.-]+/);
+    for (const p of parts) {
+      if (p.length > 2 && !QUESTION_WORDS.has(p) && !FILLER_WORDS.has(p)) {
+        terms.add(p);
+      }
+    }
+  }
+
+  // Extract quoted phrases as-is
+  const quoted = query.match(/"([^"]+)"/g);
+  if (quoted) {
+    for (const q of quoted) terms.add(q.replace(/"/g, "").toLowerCase());
+  }
+
+  return [...terms].filter((t) => t.length > 1);
+}
+
+// ---------------------------------------------------------------------------
 // Main pipeline
 // ---------------------------------------------------------------------------
 
 const MAX_FILE_SIZE = 200 * 1024 * 1024; // 200 MB
 const CLAUDE_TIMEOUT_MS = 60_000;
-
-// ---------------------------------------------------------------------------
-// Claude-powered query extraction (step 3)
-// ---------------------------------------------------------------------------
-
-async function extractSearchTerms(query: string): Promise<string[]> {
-  let proc: ReturnType<typeof Bun.spawn> | undefined;
-  try {
-    const home = process.env.HOME || os.homedir();
-    const env: Record<string, string> = {};
-    for (const [k, v] of Object.entries(process.env)) {
-      if (k !== "CLAUDECODE" && v !== undefined) env[k] = v;
-    }
-    env.HOME = home;
-    if (!env.PATH) env.PATH = `/usr/local/bin:/usr/bin:/bin:${home}/.local/bin`;
-    const claudeBin = `${home}/.local/bin/claude`;
-
-    const prompt = `Extract 2-5 focused search terms or short phrases from this question. These will be used for full-text search in a conversation database. Return ONLY the terms, one per line, no numbering or explanation. Prefer specific nouns and project names over generic verbs.
-
-Question: ${query}`;
-
-    proc = Bun.spawn([claudeBin, "-p", "--model", "sonnet"], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      env,
-    });
-    proc.stdin.write(prompt);
-    proc.stdin.flush();
-    proc.stdin.end();
-
-    const result = await Promise.race([
-      new Response(proc.stdout).text(),
-      new Promise<string>((_, reject) =>
-        setTimeout(() => reject(new Error("timeout")), 15_000),
-      ),
-    ]);
-
-    await proc.exited;
-    return result
-      .trim()
-      .split("\n")
-      .map((l) => l.trim().replace(/^[-*\d.]+\s*/, ""))
-      .filter((l) => l.length > 1 && l.length < 60);
-  } catch {
-    proc?.kill();
-    return [];
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Session metadata search (step 1)
@@ -238,24 +244,31 @@ function searchMetadata(
 }
 
 // ---------------------------------------------------------------------------
-// Main pipeline
+// Search phase (shared by askQuestion and askQuestionStream)
 // ---------------------------------------------------------------------------
 
-export async function askQuestion(
+interface AskSearchOptions {
+  maxSources?: number;
+  contextTurns?: number;
+  vectorIndex?: VectorIndex;
+  embeddingEngine?: EmbeddingEngine;
+}
+
+interface SearchPhaseResult {
+  sources: AskSource[];
+  prompt: string;
+  timing: { ftsMs: number; vectorMs: number };
+}
+
+async function searchForSources(
   db: ConvoDb,
   query: string,
-  options?: {
-    maxSources?: number;
-    contextTurns?: number;
-    vectorIndex?: VectorIndex;
-    embeddingEngine?: EmbeddingEngine;
-  },
-): Promise<AskResult> {
-  const t0 = performance.now();
-  const maxSources = options?.maxSources ?? 6;
+  options?: AskSearchOptions,
+): Promise<SearchPhaseResult> {
+  const tStart = performance.now();
+  const maxSources = options?.maxSources ?? 15;
   const contextTurns = options?.contextTurns ?? 1;
 
-  // Load excluded project patterns (e.g. "think-tank*" excludes all think-tank variants)
   const excludedPatterns = db.getSearchExcludedProjects();
   function isExcluded(sessionId: string): boolean {
     if (excludedPatterns.length === 0) return false;
@@ -270,16 +283,10 @@ export async function askQuestion(
   }
 
   // ------------------------------------------------------------------
-  // 1-3: Run metadata, FTS, and Claude extraction in parallel
+  // 1. Metadata + FTS search
   // ------------------------------------------------------------------
-
-  // Start Claude term extraction first (slow, ~10s)
-  const termsPromise = extractSearchTerms(query);
-
-  // Metadata search (instant — sync DB query)
   const metadataIds = searchMetadata(db, query, maxSources);
 
-  // FTS search with sanitized query (instant — sync DB query)
   const ftsQuery = sanitizeFtsQuery(query);
   let sessionHits: Array<{ session_id: string; match_count: number; best_rank: number }> = [];
   try {
@@ -289,32 +296,36 @@ export async function askQuestion(
     console.error(`[ask] FTS error for query "${ftsQuery}": ${msg}`);
   }
 
-  // Await Claude-extracted terms, then do additional targeted FTS
-  let claudeTerms: string[] = [];
-  try {
-    claudeTerms = await termsPromise;
-    console.log(`[ask] Claude extracted terms: ${claudeTerms.join(", ")}`);
-  } catch { /* non-fatal */ }
+  const ftsTokens = ftsQuery.toLowerCase().split(/\s+/).filter((t) => t !== "OR" && t.length > 1);
 
-  for (const term of claudeTerms) {
+  // Individual FTS queries per token — ensures each concept gets proper
+  // representation instead of being drowned by generic words in the OR query
+  for (const token of ftsTokens.slice(0, 6)) {
     try {
-      const sanitized = sanitizeFtsQuery(term);
-      if (!sanitized) continue;
-      const hits = db.searchSessions(sanitized, maxSources * 3);
+      const hits = db.searchSessions(token, maxSources * 2);
       sessionHits.push(...hits);
-    } catch { /* skip bad queries */ }
+    } catch { /* best-effort */ }
+  }
+
+  const localTerms = extractLocalTerms(query, ftsTokens);
+  const extraTerms = localTerms.filter((t) => !ftsTokens.includes(t) && t.length > 2);
+  if (extraTerms.length > 0) {
+    for (const term of extraTerms.slice(0, 8)) {
+      try {
+        const hits = db.searchSessions(term, maxSources * 2);
+        sessionHits.push(...hits);
+      } catch { /* best-effort */ }
+    }
+    console.log(`[ask] Extra FTS terms: ${extraTerms.slice(0, 8).join(", ")}`);
   }
 
   const tFts = performance.now();
 
   // ------------------------------------------------------------------
-  // Vector search (parallel to FTS, gracefully skipped if unavailable)
+  // 2. Vector search
   // ------------------------------------------------------------------
   let vectorSessionRanking: Array<{
-    sessionId: string;
-    bestScore: number;
-    bestTurnIndex: number;
-    matchCount: number;
+    sessionId: string; bestScore: number; bestTurnIndex: number; matchCount: number;
   }> = [];
   let vectorMs = 0;
 
@@ -322,7 +333,7 @@ export async function askQuestion(
     try {
       const tVec0 = performance.now();
       const queryVec = await options.embeddingEngine.embedQuery(query);
-      vectorSessionRanking = options.vectorIndex.searchSessions(queryVec, maxSources * 4);
+      vectorSessionRanking = options.vectorIndex.searchSessions(queryVec, maxSources * 8);
       vectorMs = Math.round(performance.now() - tVec0);
       console.log(`[ask] Vector search: ${vectorSessionRanking.length} sessions in ${vectorMs}ms`);
     } catch (e) {
@@ -332,14 +343,11 @@ export async function askQuestion(
   }
 
   // ------------------------------------------------------------------
-  // RRF merge: combine FTS, vector, and metadata signals
+  // 3. RRF merge
   // ------------------------------------------------------------------
   const RRF_K = 60;
-
-  // Build FTS session ranking (deduplicated, sorted by score)
   const filteredHits = sessionHits.filter((h) => !isExcluded(h.session_id));
   const ftsSessionScores = mergeFtsHits(filteredHits);
-  // Sort FTS sessions by rank (lower = better) with hit count tiebreak
   const ftsRanked = [...ftsSessionScores.entries()]
     .sort((a, b) => {
       const ra = a[1].bestRank - (a[1].totalHits > 1 ? Math.log2(a[1].totalHits) * 1.5 : 0);
@@ -348,8 +356,6 @@ export async function askQuestion(
     })
     .map(([id]) => id);
 
-  // Build vector session ranking (already sorted by bestScore desc)
-  // Preserve bestTurnIndex for use in context loading
   const vectorTurnHints = new Map<string, number>();
   const vectorRanked: string[] = [];
   for (const v of vectorSessionRanking) {
@@ -358,10 +364,7 @@ export async function askQuestion(
     vectorTurnHints.set(v.sessionId, v.bestTurnIndex);
   }
 
-  // Metadata ranking
   const metadataRanked = metadataIds.filter((id) => !isExcluded(id));
-
-  // Compute RRF scores
   const rrfScores = new Map<string, number>();
   const allSessionIds = new Set([...ftsRanked, ...vectorRanked, ...metadataRanked]);
 
@@ -376,7 +379,6 @@ export async function askQuestion(
     rrfScores.set(id, score);
   }
 
-  // Select top N sessions by RRF score
   const finalSessionIds = [...rrfScores.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, maxSources)
@@ -385,7 +387,7 @@ export async function askQuestion(
   console.log(`[ask] RRF selected ${finalSessionIds.length} sessions (FTS:${ftsRanked.length} Vec:${vectorRanked.length} Meta:${metadataRanked.length})`);
 
   // ------------------------------------------------------------------
-  // 3. Load turn context
+  // 4. Load turn context
   // ------------------------------------------------------------------
   const sources: AskSource[] = [];
 
@@ -393,55 +395,36 @@ export async function askQuestion(
     const session = db.getSession(sessionId);
     if (!session?.jsonl_path) continue;
 
-    // Skip files that are too large or missing
     let stat: fs.Stats;
-    try {
-      stat = fs.statSync(session.jsonl_path);
-    } catch {
-      continue;
-    }
+    try { stat = fs.statSync(session.jsonl_path); } catch { continue; }
     if (stat.size > MAX_FILE_SIZE) continue;
 
-    // Parse the JSONL
     let allTurns: Turn[];
     try {
       const content = fs.readFileSync(session.jsonl_path, "utf-8");
       const parser = new IncrementalParser();
       parser.feedLines(content.split("\n"));
       allTurns = parser.getTurns();
-    } catch {
-      continue;
-    }
+    } catch { continue; }
 
-    // Find turns matching query keywords via simple text search
-    // Combine FTS tokens + Claude-extracted terms for better matching
-    const allTerms = new Set([
-      ...ftsQuery.toLowerCase().split(/\s+/).filter((t) => t !== "OR" && t.length > 1),
-      ...claudeTerms.map((t) => t.toLowerCase()),
-    ]);
-    const keywords = [...allTerms];
     const matchingIndices: number[] = [];
-
-    // Prioritize the vector search's best turn if available
     const vecHint = vectorTurnHints.get(sessionId);
     if (vecHint !== undefined && vecHint >= 0 && vecHint < allTurns.length) {
       matchingIndices.push(vecHint);
     }
 
     for (let i = 0; i < allTurns.length; i++) {
-      if (i === vecHint) continue; // already added
+      if (i === vecHint) continue;
       const text = turnToPlainText(allTurns[i]).toLowerCase();
-      if (keywords.some((kw) => text.includes(kw))) {
+      if (localTerms.some((kw) => text.includes(kw))) {
         matchingIndices.push(i);
       }
     }
 
-    // If no keyword matches, take the first human turn as a fallback
     if (matchingIndices.length === 0 && allTurns.length > 0) {
       matchingIndices.push(0);
     }
 
-    // Build context windows, keep up to 3 best matches per session
     const topMatches = matchingIndices.slice(0, 3);
     const windows: Array<[number, number]> = [];
     for (const idx of topMatches) {
@@ -450,7 +433,6 @@ export async function askQuestion(
       windows.push([lo, hi]);
     }
 
-    // Merge overlapping windows
     windows.sort((a, b) => a[0] - b[0]);
     const merged: Array<[number, number]> = [];
     for (const [lo, hi] of windows) {
@@ -476,49 +458,67 @@ export async function askQuestion(
   }
 
   // ------------------------------------------------------------------
-  // 4. Build prompt (cap total excerpt size to ~20K chars)
+  // 5. Build prompt with numbered source citations
   // ------------------------------------------------------------------
   const MAX_EXCERPT_CHARS = 20_000;
   let totalChars = 0;
   const excerptParts: string[] = [];
 
-  for (const src of sources) {
+  for (let i = 0; i < sources.length; i++) {
     if (totalChars >= MAX_EXCERPT_CHARS) break;
+    const src = sources[i];
+    const num = i + 1;
+    const projectName = (src.project || "unknown").split("/").pop() || src.project;
     const turnXml = src.turns.map((turn, j) => {
       const idx = src.startTurnIndex + j;
       const text = turnToPlainText(turn);
       return `    <turn index="${idx}" role="${turn.role}">\n${text}\n    </turn>`;
     }).join("\n");
 
-    const sessionXml = `  <session id="${src.sessionId}" project="${src.project}" title="${src.title}">\n${turnXml}\n  </session>`;
-    totalChars += sessionXml.length;
-    excerptParts.push(sessionXml);
+    const sourceXml = `  <source n="${num}" project="${projectName}" session="${src.sessionId}">\n${turnXml}\n  </source>`;
+    totalChars += sourceXml.length;
+    excerptParts.push(sourceXml);
   }
   const excerpts = excerptParts.join("\n");
 
   const prompt = `<query>${query}</query>
 
-<excerpts>
+<sources>
 ${excerpts}
-</excerpts>
+</sources>
 
 You are a search assistant for a developer's conversation history with Claude Code.
-Answer the query by synthesizing information from the excerpts above.
-Be concise and specific. Cite sources using [/c/${"{sessionId}"}#turn-{turnIndex}] format.
-If the excerpts don't contain relevant information, say so honestly.
+Answer the query by synthesizing information from the numbered sources above.
+Be concise and specific. Cite sources by number: [1], [2], etc.
+If the sources don't contain relevant information, say so honestly.
 Use markdown formatting in your answer.`;
 
-  // ------------------------------------------------------------------
-  // 5. Shell out to claude
-  // ------------------------------------------------------------------
+  return {
+    sources,
+    prompt,
+    timing: { ftsMs: Math.round(tFts - tStart), vectorMs },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Main pipeline: non-streaming
+// ---------------------------------------------------------------------------
+
+export async function askQuestion(
+  db: ConvoDb,
+  query: string,
+  options?: AskSearchOptions,
+): Promise<AskResult> {
+  const t0 = performance.now();
+  const search = await searchForSources(db, query, options);
+
   let answer = "";
   let claudeError: string | undefined;
   const tClaudeStart = performance.now();
 
-  if (sources.length > 0) {
+  if (search.sources.length > 0) {
     let proc: ReturnType<typeof Bun.spawn> | undefined;
     try {
-      // Unset CLAUDECODE to avoid nested session detection, ensure HOME/PATH
       const home = process.env.HOME || os.homedir();
       const env: Record<string, string> = {};
       for (const [k, v] of Object.entries(process.env)) {
@@ -526,20 +526,14 @@ Use markdown formatting in your answer.`;
       }
       env.HOME = home;
       if (!env.PATH) env.PATH = `/usr/local/bin:/usr/bin:/bin:${home}/.local/bin`;
-      const claudeBin = `${home}/.local/bin/claude`;
-      proc = Bun.spawn([claudeBin, "-p", "--model", "haiku"], {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-        env,
+      proc = Bun.spawn([`${home}/.local/bin/claude`, "-p", "--model", "haiku"], {
+        stdin: "pipe", stdout: "pipe", stderr: "pipe", env,
       });
 
-      // Write prompt to stdin and close
-      proc.stdin.write(prompt);
+      proc.stdin.write(search.prompt);
       proc.stdin.flush();
       proc.stdin.end();
 
-      // Read stdout with timeout
       const stdoutPromise = new Response(proc.stdout).text();
       const stderrPromise = new Response(proc.stderr).text();
 
@@ -551,8 +545,6 @@ Use markdown formatting in your answer.`;
       ]);
 
       answer = result.trim();
-
-      // Check exit code
       const exitCode = await proc.exited;
       if (exitCode !== 0) {
         const stderr = await stderrPromise;
@@ -568,20 +560,127 @@ Use markdown formatting in your answer.`;
   }
 
   const tEnd = performance.now();
-
-  // ------------------------------------------------------------------
-  // 6. Return result
-  // ------------------------------------------------------------------
   return {
     query,
     answer,
-    sources,
+    sources: search.sources,
     timing: {
-      ftsMs: Math.round(tFts - t0),
-      vectorMs,
+      ftsMs: search.timing.ftsMs,
+      vectorMs: search.timing.vectorMs,
       claudeMs: Math.round(tEnd - tClaudeStart),
       totalMs: Math.round(tEnd - t0),
     },
     error: claudeError,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Streaming pipeline: yields sources immediately, then streams Claude chunks
+// ---------------------------------------------------------------------------
+
+export async function* askQuestionStream(
+  db: ConvoDb,
+  query: string,
+  options?: AskSearchOptions,
+): AsyncGenerator<AskStreamEvent> {
+  const t0 = performance.now();
+
+  try {
+    const search = await searchForSources(db, query, options);
+
+    // Yield sources immediately — client renders them while Claude thinks
+    const streamSources: StreamSourceInfo[] = search.sources.map((src, i) => ({
+      num: i + 1,
+      sessionId: src.sessionId,
+      project: (src.project || "unknown").split("/").pop() || src.project,
+      title: src.title,
+      matchTurnIndex: src.matchTurnIndex,
+      startTurnIndex: src.startTurnIndex,
+      turns: src.turns
+        .map((turn, j) => ({
+          role: turn.role,
+          index: src.startTurnIndex + j,
+          text: turnToPlainText(turn),
+        }))
+        .filter((t) => t.role === "human" || t.role === "assistant"),
+    }));
+
+    yield { type: "sources", sources: streamSources, timing: search.timing };
+
+    if (search.sources.length === 0) {
+      yield { type: "done", timing: { ...search.timing, claudeMs: 0, totalMs: Math.round(performance.now() - t0) } };
+      return;
+    }
+
+    // Stream Claude's response
+    const tClaude = performance.now();
+    const home = process.env.HOME || os.homedir();
+    const env: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (k !== "CLAUDECODE" && v !== undefined) env[k] = v;
+    }
+    env.HOME = home;
+    if (!env.PATH) env.PATH = `/usr/local/bin:/usr/bin:/bin:${home}/.local/bin`;
+
+    const proc = Bun.spawn(
+      [`${home}/.local/bin/claude`, "-p", "--model", "haiku",
+       "--output-format", "stream-json", "--verbose", "--include-partial-messages"],
+      { stdin: "pipe", stdout: "pipe", stderr: "pipe", env },
+    );
+
+    proc.stdin.write(search.prompt);
+    proc.stdin.flush();
+    proc.stdin.end();
+
+    // Consume stderr concurrently to prevent buffer blocking
+    const stderrPromise = new Response(proc.stderr).text();
+
+    // Parse stream-json: extract text deltas from stream_event wrappers
+    // Structure: {"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"..."}}}
+    const reader = proc.stdout.getReader();
+    const decoder = new TextDecoder();
+    let lineBuf = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        lineBuf += decoder.decode(value, { stream: true });
+        const lines = lineBuf.split("\n");
+        lineBuf = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const outer = JSON.parse(line);
+            if (outer.type === "stream_event") {
+              const evt = outer.event;
+              if (evt?.type === "content_block_delta" && evt.delta?.type === "text_delta" && evt.delta.text) {
+                yield { type: "chunk", text: evt.delta.text };
+              }
+            }
+          } catch { /* ignore parse errors on partial lines */ }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) {
+      const stderr = await stderrPromise;
+      yield { type: "error", message: `claude exited with code ${exitCode}: ${stderr.slice(0, 500)}` };
+    }
+
+    const tEnd = performance.now();
+    yield {
+      type: "done",
+      timing: {
+        ftsMs: search.timing.ftsMs,
+        vectorMs: search.timing.vectorMs,
+        claudeMs: Math.round(tEnd - tClaude),
+        totalMs: Math.round(tEnd - t0),
+      },
+    };
+  } catch (e) {
+    yield { type: "error", message: e instanceof Error ? e.message : String(e) };
+  }
 }

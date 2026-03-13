@@ -45,10 +45,21 @@ const ASK_CSS = `
   .answer-card {
     background: var(--surface); border: 1px solid var(--border);
     border-radius: 8px; margin: 20px 0 16px; overflow: hidden;
+    animation: answerIn 0.35s ease-out;
+  }
+  @keyframes answerIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
   }
   .answer-header {
     font-size: 11px; font-weight: 600; text-transform: uppercase;
     letter-spacing: 0.05em; color: var(--text-muted); padding: 10px 16px 0;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .answer-header .answer-spinner {
+    width: 12px; height: 12px; border: 2px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin 0.8s linear infinite;
   }
   .answer-body { padding: 8px 16px 14px; font-size: 14px; line-height: 1.65; }
   .answer-body p { margin-bottom: 8px; }
@@ -57,7 +68,7 @@ const ASK_CSS = `
     margin: 12px 0 4px; letter-spacing: -0.01em;
   }
   .answer-body li { margin-left: 20px; line-height: 1.55; }
-  .answer-body ul { margin: 4px 0; padding: 0; }
+  .answer-body ul, .answer-body ol { margin: 4px 0; padding: 0; }
   .answer-body hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
   .answer-body code {
     background: var(--code-bg); padding: 2px 5px; border-radius: 3px;
@@ -70,18 +81,33 @@ const ASK_CSS = `
     border: 1px solid var(--border);
   }
   .answer-body pre code { background: none; padding: 0; font-size: inherit; border: none; }
-  .answer-body a { color: var(--accent); text-decoration: none; }
-  .answer-body a:hover { text-decoration: underline; }
+  .answer-body a:not(.cite-badge) { color: var(--accent); text-decoration: none; }
+  .answer-body a:not(.cite-badge):hover { text-decoration: underline; }
+
+  /* Citation badges */
+  .cite-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 18px; height: 18px; padding: 0 4px;
+    border-radius: 9px; background: var(--accent); color: #fff;
+    font-size: 10px; font-weight: 700; text-decoration: none;
+    vertical-align: super; margin: 0 1px; cursor: pointer;
+    transition: opacity 0.15s, transform 0.15s;
+    line-height: 1;
+  }
+  .cite-badge:hover { opacity: 0.85; transform: scale(1.1); }
 
   /* Error banner */
   .ask-error {
-    background: var(--error-bg); border: 1px solid var(--error-border);
+    background: var(--error-bg, rgba(255,100,100,0.1)); border: 1px solid var(--error-border, rgba(255,100,100,0.3));
     border-radius: 6px; padding: 10px 14px; margin: 16px 0;
     font-size: 13px; color: var(--text);
   }
 
   /* Timing */
-  .ask-timing { font-size: 12px; color: var(--text-muted); margin: 12px 0 20px; }
+  .ask-timing {
+    font-size: 12px; color: var(--text-muted); margin: 12px 0 20px;
+    animation: fadeIn 0.3s ease-out;
+  }
   .timing-detail { color: var(--text-tertiary); }
 
   /* Loading state */
@@ -95,14 +121,28 @@ const ASK_CSS = `
     animation: spin 0.8s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
   .elapsed { font-size: 12px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
 
   /* Source blocks */
-  .source-block { margin-bottom: 24px; }
+  .source-block {
+    margin-bottom: 24px;
+    opacity: 0; animation: slideIn 0.3s ease-out forwards;
+  }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
   .source-block + .source-block { border-top: 1px solid var(--border); padding-top: 24px; }
   .source-header {
-    display: flex; align-items: baseline; gap: 8px;
+    display: flex; align-items: center; gap: 8px;
     margin-bottom: 8px; flex-wrap: wrap;
+  }
+  .source-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--accent); color: #fff;
+    font-size: 11px; font-weight: 700; flex-shrink: 0;
   }
   .source-project { font-size: 13px; font-weight: 600; color: var(--user-label); }
   .source-title { font-size: 12px; color: var(--text-muted); font-weight: 400; }
@@ -112,7 +152,7 @@ const ASK_CSS = `
   }
   .source-link:hover { text-decoration: underline; }
 
-  /* Source turns — reuse main conversation turn styles */
+  /* Source turns */
   .source-turns { display: flex; flex-direction: column; gap: 6px; }
   .source-turns .turn { margin: 0; font-size: 13px; cursor: pointer; transition: opacity 0.15s; }
   .source-turns .turn:hover { opacity: 0.8; }
@@ -122,11 +162,278 @@ const ASK_CSS = `
   .source-turns .message-text { font-size: 13px; line-height: 1.55; }
   .source-turns .message-text p { margin-bottom: 4px; }
   .turn-link { text-decoration: none; color: inherit; display: block; }
+
+  /* Highlight source on badge hover */
+  .source-block.highlighted { box-shadow: 0 0 0 2px var(--accent); border-radius: 8px; padding: 12px; margin: -12px; margin-bottom: 12px; }
+
+  /* Searching status */
+  .search-status {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 13px; color: var(--text-muted);
+    margin: 20px 0 12px; animation: fadeIn 0.3s ease-out;
+  }
+  .search-status .mini-spinner {
+    width: 14px; height: 14px; border: 2px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin 0.8s linear infinite; flex-shrink: 0;
+  }
 `;
 
+// ---------------------------------------------------------------------------
+// Client-side streaming JS
+// ---------------------------------------------------------------------------
+
+function buildStreamingJs(query: string): string {
+  return `
+(function() {
+  var q = ${JSON.stringify(query)};
+  var t0 = Date.now();
+  var answerArea = document.getElementById('answer-area');
+  var sourcesArea = document.getElementById('sources-area');
+  var statusArea = document.getElementById('status-area');
+  var sourceMap = {}; // num -> {sessionId, matchTurnIndex}
+  var answerText = '';
+  var answerVisible = false;
+
+  function esc(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // Minimal markdown renderer for streaming
+  function renderMd(text) {
+    var blocks = [];
+    var lines = text.split('\\n');
+    var inCode = false, codeBuf = [], listTag = null;
+    function flushList() { if (listTag) { blocks.push('</' + listTag + '>'); listTag = null; } }
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (line.trimStart().startsWith('\`\`\`')) {
+        if (!inCode) { flushList(); inCode = true; codeBuf = []; }
+        else { blocks.push('<pre><code>' + esc(codeBuf.join('\\n')) + '</code></pre>'); inCode = false; }
+        continue;
+      }
+      if (inCode) { codeBuf.push(line); continue; }
+      var trimmed = line.trim();
+      if (!trimmed) { flushList(); continue; }
+      var hm = trimmed.match(/^(#{1,6})\\s+(.*)/);
+      if (hm) { flushList(); blocks.push('<h' + hm[1].length + '>' + inlineMd(hm[2]) + '</h' + hm[1].length + '>'); continue; }
+      if (/^[-*]\\s+/.test(trimmed)) {
+        if (listTag !== 'ul') { flushList(); blocks.push('<ul>'); listTag = 'ul'; }
+        blocks.push('<li>' + inlineMd(trimmed.replace(/^[-*]\\s+/, '')) + '</li>'); continue;
+      }
+      if (/^\\d+\\.\\s+/.test(trimmed)) {
+        if (listTag !== 'ol') { flushList(); blocks.push('<ol>'); listTag = 'ol'; }
+        blocks.push('<li>' + inlineMd(trimmed.replace(/^\\d+\\.\\s+/, '')) + '</li>'); continue;
+      }
+      flushList();
+      blocks.push('<p>' + inlineMd(trimmed) + '</p>');
+    }
+    flushList();
+    if (inCode) blocks.push('<pre><code>' + esc(codeBuf.join('\\n')) + '</code></pre>');
+    return blocks.join('\\n');
+  }
+
+  function inlineMd(s) {
+    s = esc(s);
+    s = s.replace(/\`([^\`]+)\`/g, '<code>$1</code>');
+    s = s.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
+    s = s.replace(/\\*([^*]+)\\*/g, '<em>$1</em>');
+    s = s.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, '<a href="$2">$1</a>');
+    return s;
+  }
+
+  // Replace [N] with citation badges
+  function addCitations(html) {
+    return html.replace(/\\[(\\d+)\\]/g, function(m, n) {
+      var src = sourceMap[n];
+      if (!src) return m;
+      return '<a class="cite-badge" href="/c/' + src.sessionId + '#turn-' + src.matchTurnIndex + '" '
+        + 'data-source="' + n + '" title="Source ' + n + ': ' + esc(src.project) + '" '
+        + 'onmouseenter="highlightSource(' + n + ')" onmouseleave="unhighlightSource(' + n + ')" '
+        + 'onclick="scrollToSource(event,' + n + ')">' + n + '</a>';
+    });
+  }
+
+  function updateAnswer() {
+    if (!answerText) return;
+    if (!answerVisible) {
+      answerArea.innerHTML = '<div class="answer-card"><div class="answer-header">Answer <div class="answer-spinner"></div></div><div class="answer-body" id="answer-body"></div></div>';
+      answerVisible = true;
+    }
+    var body = document.getElementById('answer-body');
+    if (body) body.innerHTML = addCitations(renderMd(answerText));
+  }
+
+  function renderSources(sources) {
+    sourcesArea.innerHTML = '';
+    var MAX_TEXT = 400;
+    for (var i = 0; i < sources.length; i++) {
+      var src = sources[i];
+      sourceMap[src.num] = src;
+      var el = document.createElement('div');
+      el.className = 'source-block';
+      el.id = 'source-' + src.num;
+      el.style.animationDelay = (i * 60) + 'ms';
+
+      var turnsHtml = '';
+      var turns = src.turns.slice(0, 4);
+      for (var j = 0; j < turns.length; j++) {
+        var t = turns[j];
+        var roleClass = t.role === 'human' ? 'user' : 'assistant';
+        var roleLabel = t.role === 'human' ? 'YOU' : 'CLAUDE';
+        var text = t.text || '';
+        if (text.length > MAX_TEXT) text = text.slice(0, MAX_TEXT) + '...';
+        var href = '/c/' + src.sessionId + '#turn-' + t.index;
+        turnsHtml += '<a class="turn-link" href="' + href + '"><div class="turn ' + roleClass + '">'
+          + '<div class="turn-header"><span class="role-label">' + roleLabel + '</span></div>'
+          + '<div class="turn-body"><div class="message-text">' + renderMd(text) + '</div></div>'
+          + '</div></a>';
+      }
+
+      var projName = src.project || 'unknown';
+      var shortId = src.sessionId.slice(0, 8);
+      var titleHtml = src.title ? ' <span class="source-title">' + esc(src.title) + '</span>' : '';
+
+      el.innerHTML = '<div class="source-header">'
+        + '<span class="source-num">' + src.num + '</span>'
+        + '<span class="source-project">' + esc(projName) + '</span>' + titleHtml
+        + '<a class="source-link" href="/c/' + src.sessionId + '#turn-' + src.matchTurnIndex + '">' + shortId + '&hellip; &rarr;</a>'
+        + '</div>'
+        + '<div class="source-turns">' + turnsHtml + '</div>';
+
+      sourcesArea.appendChild(el);
+    }
+  }
+
+  function showTiming(timing) {
+    var parts = [];
+    if (timing.ftsMs) parts.push('FTS ' + timing.ftsMs + 'ms');
+    if (timing.vectorMs) parts.push('Vector ' + timing.vectorMs + 'ms');
+    if (timing.claudeMs) parts.push('Claude ' + (timing.claudeMs / 1000).toFixed(1) + 's');
+    var count = Object.keys(sourceMap).length;
+    statusArea.innerHTML = '<div class="ask-timing">'
+      + count + ' source' + (count !== 1 ? 's' : '') + ' in ' + (timing.totalMs / 1000).toFixed(1) + 's'
+      + (parts.length ? ' <span class="timing-detail">(' + parts.join(', ') + ')</span>' : '')
+      + '</div>';
+  }
+
+  // Remove spinner from answer header when done
+  function finishAnswer() {
+    var hdr = answerArea.querySelector('.answer-header');
+    if (hdr) {
+      var spinner = hdr.querySelector('.answer-spinner');
+      if (spinner) spinner.remove();
+    }
+  }
+
+  // Stream via NDJSON
+  function doStream(query) {
+    statusArea.innerHTML = '<div class="search-status"><div class="mini-spinner"></div>Searching...</div>';
+    answerArea.innerHTML = '';
+    sourcesArea.innerHTML = '';
+    answerText = '';
+    answerVisible = false;
+    sourceMap = {};
+
+    fetch('/api/ask-stream', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({query: query})
+    }).then(function(resp) {
+      var reader = resp.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
+      var renderTimer = null;
+
+      function scheduleRender() {
+        if (renderTimer) return;
+        renderTimer = setTimeout(function() { renderTimer = null; updateAnswer(); }, 80);
+      }
+
+      function pump() {
+        return reader.read().then(function(result) {
+          if (result.done) {
+            // Process any remaining buffer
+            if (buffer.trim()) processLine(buffer);
+            if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+            updateAnswer();
+            finishAnswer();
+            return;
+          }
+          buffer += decoder.decode(result.value, {stream: true});
+          var lines = buffer.split('\\n');
+          buffer = lines.pop() || '';
+          for (var i = 0; i < lines.length; i++) {
+            if (lines[i].trim()) processLine(lines[i]);
+          }
+          return pump();
+        });
+      }
+
+      function processLine(line) {
+        try {
+          var event = JSON.parse(line);
+          if (event.type === 'sources') {
+            renderSources(event.sources);
+            var searchTime = (event.timing.ftsMs || 0) + (event.timing.vectorMs || 0);
+            statusArea.innerHTML = '<div class="search-status"><div class="mini-spinner"></div>Found '
+              + event.sources.length + ' source' + (event.sources.length !== 1 ? 's' : '')
+              + ' in ' + searchTime + 'ms — generating answer...</div>';
+          } else if (event.type === 'chunk') {
+            answerText += event.text;
+            scheduleRender();
+          } else if (event.type === 'done') {
+            showTiming(event.timing);
+          } else if (event.type === 'error') {
+            statusArea.innerHTML += '<div class="ask-error">' + esc(event.message) + '</div>';
+          }
+        } catch(e) { /* ignore parse errors on partial lines */ }
+      }
+
+      return pump();
+    }).catch(function(err) {
+      statusArea.innerHTML = '<div class="ask-error">Request failed: ' + esc(err.message) + '</div>';
+    });
+  }
+
+  // Source highlight on badge hover
+  window.highlightSource = function(n) {
+    var el = document.getElementById('source-' + n);
+    if (el) el.classList.add('highlighted');
+  };
+  window.unhighlightSource = function(n) {
+    var el = document.getElementById('source-' + n);
+    if (el) el.classList.remove('highlighted');
+  };
+  window.scrollToSource = function(e, n) {
+    e.preventDefault();
+    var el = document.getElementById('source-' + n);
+    if (el) el.scrollIntoView({behavior: 'smooth', block: 'center'});
+  };
+
+  // Initial stream
+  doStream(q);
+
+  // Handle new searches
+  document.querySelector('.ask-search-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    var newQ = document.querySelector('.ask-search-input').value.trim();
+    if (!newQ) return;
+    history.pushState(null, '', '/ask?q=' + encodeURIComponent(newQ));
+    document.title = 'Ask — ' + newQ + ' — Gloss';
+    doStream(newQ);
+  });
+})();
+`;
+}
+
+// ---------------------------------------------------------------------------
+// Page builders
+// ---------------------------------------------------------------------------
+
 /**
- * Lightweight loading page returned instantly by GET /ask.
- * Fetches results from POST /api/ask and swaps content in.
+ * Streaming loading page — returned instantly by GET /ask.
+ * Uses NDJSON streaming: sources appear first, then answer streams in.
  */
 export function buildAskLoadingPage(query: string): string {
   return `<!DOCTYPE html>
@@ -148,47 +455,19 @@ export function buildAskLoadingPage(query: string): string {
     <input class="ask-search-input" type="text" name="q" value="${escapeAttr(query)}" placeholder="Ask your conversations..." autofocus>
   </form>
 </div>
-<div class="ask-page" id="results">
-  <div class="ask-loading">
-    <div class="spinner"></div>
-    <div>Searching with AI...</div>
-    <div class="elapsed"></div>
-  </div>
+<div class="ask-page">
+  <div id="answer-area"></div>
+  <div id="status-area"></div>
+  <div id="sources-area"></div>
 </div>
-<script>
-(function() {
-  var q = ${JSON.stringify(query)};
-  var t0 = Date.now();
-  var el = document.querySelector('.elapsed');
-  var iv = setInterval(function() { el.textContent = Math.round((Date.now()-t0)/1000)+'s'; }, 1000);
-
-  fetch('/api/ask-html', {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({query: q})
-  })
-  .then(function(r) { return r.text(); })
-  .then(function(html) {
-    clearInterval(iv);
-    document.getElementById('results').innerHTML = html;
-  })
-  .catch(function(err) {
-    clearInterval(iv);
-    document.getElementById('results').innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-muted)">Request failed: '+err.message+'</div>';
-  });
-
-  // Handle new searches from the form
-  document.querySelector('.ask-search-form').addEventListener('submit', function(e) {
-    e.preventDefault();
-    var newQ = document.querySelector('.ask-search-input').value.trim();
-    if (!newQ) return;
-    window.location.href = '/ask?q=' + encodeURIComponent(newQ);
-  });
-})();
-</script>
+<script>${buildStreamingJs(query)}</script>
 </body>
 </html>`;
 }
+
+// ---------------------------------------------------------------------------
+// Server-rendered results (used by /api/ask-html fallback)
+// ---------------------------------------------------------------------------
 
 /** Render Claude's answer markdown to HTML, line-by-line. */
 function renderAnswerMarkdown(md: string): string {
@@ -203,49 +482,24 @@ function renderAnswerMarkdown(md: string): string {
   }
 
   for (const line of lines) {
-    // Code fences
     if (line.trimStart().startsWith("```")) {
-      if (!inCode) {
-        flushList();
-        inCode = true;
-        codeBuf = [];
-      } else {
-        out.push(`<pre><code>${escape(codeBuf.join("\n"))}</code></pre>`);
-        inCode = false;
-      }
+      if (!inCode) { flushList(); inCode = true; codeBuf = []; }
+      else { out.push(`<pre><code>${escape(codeBuf.join("\n"))}</code></pre>`); inCode = false; }
       continue;
     }
     if (inCode) { codeBuf.push(line); continue; }
-
     const trimmed = line.trim();
-
-    // Blank line
     if (!trimmed) { flushList(); continue; }
-
-    // Heading
     const hMatch = trimmed.match(/^(#{1,6})\s+(.*)/);
-    if (hMatch) {
-      flushList();
-      const level = hMatch[1].length;
-      out.push(`<h${level}>${renderMarkdownInline(hMatch[2])}</h${level}>`);
-      continue;
-    }
-
-    // Unordered list item
+    if (hMatch) { flushList(); out.push(`<h${hMatch[1].length}>${renderMarkdownInline(hMatch[2])}</h${hMatch[1].length}>`); continue; }
     if (/^[-*]\s+/.test(trimmed)) {
       if (listTag !== "ul") { flushList(); out.push("<ul>"); listTag = "ul"; }
-      out.push(`<li>${renderMarkdownInline(trimmed.replace(/^[-*]\s+/, ""))}</li>`);
-      continue;
+      out.push(`<li>${renderMarkdownInline(trimmed.replace(/^[-*]\s+/, ""))}</li>`); continue;
     }
-
-    // Ordered list item
     if (/^\d+\.\s+/.test(trimmed)) {
       if (listTag !== "ol") { flushList(); out.push("<ol>"); listTag = "ol"; }
-      out.push(`<li>${renderMarkdownInline(trimmed.replace(/^\d+\.\s+/, ""))}</li>`);
-      continue;
+      out.push(`<li>${renderMarkdownInline(trimmed.replace(/^\d+\.\s+/, ""))}</li>`); continue;
     }
-
-    // Paragraph text
     flushList();
     out.push(`<p>${renderMarkdownInline(trimmed)}</p>`);
   }
@@ -255,14 +509,25 @@ function renderAnswerMarkdown(md: string): string {
   return out.join("\n");
 }
 
+/** Replace [N] citation markers with badge HTML */
+function addCitationBadges(html: string, sources: AskPageData["sources"]): string {
+  return html.replace(/\[(\d+)\]/g, (m, n) => {
+    const idx = parseInt(n, 10) - 1;
+    if (idx < 0 || idx >= sources.length) return m;
+    const src = sources[idx];
+    const project = (src.project || "unknown").split("/").pop() || src.project;
+    return `<a class="cite-badge" href="/c/${src.sessionId}#turn-${src.matchTurnIndex}" title="Source ${n}: ${escape(project)}">${n}</a>`;
+  });
+}
+
 /**
  * Render just the results HTML fragment (answer + timing + sources).
- * Used by both the full page and the /api/ask-html endpoint.
+ * Used by the /api/ask-html endpoint.
  */
 export function buildAskResultsHtml(data: AskPageData): string {
   const { answer, sources, timing, error } = data;
 
-  const answerRendered = answer ? renderAnswerMarkdown(answer) : "";
+  const answerRendered = answer ? addCitationBadges(renderAnswerMarkdown(answer), sources) : "";
 
   const answerHtml = answerRendered
     ? `<div class="answer-card">
@@ -271,25 +536,21 @@ export function buildAskResultsHtml(data: AskPageData): string {
       </div>`
     : "";
 
-  // Error banner (Claude failed, but we still show FTS results)
-  const errorHtml = error
-    ? `<div class="ask-error">${escape(error)}</div>`
-    : "";
+  const errorHtml = error ? `<div class="ask-error">${escape(error)}</div>` : "";
 
-  // Timing line
   const sessionCount = sources.length;
   const timingParts: string[] = [];
   if (timing.ftsMs) timingParts.push(`FTS ${timing.ftsMs}ms`);
   if (timing.vectorMs) timingParts.push(`Vector ${timing.vectorMs}ms`);
-  if (timing.claudeMs) timingParts.push(`Claude ${timing.claudeMs}ms`);
-  const timingHtml = `<div class="ask-timing">Searched ${sessionCount} session${sessionCount !== 1 ? "s" : ""} in ${timing.totalMs}ms`
+  if (timing.claudeMs) timingParts.push(`Claude ${(timing.claudeMs / 1000).toFixed(1)}s`);
+  const timingHtml = `<div class="ask-timing">${sessionCount} source${sessionCount !== 1 ? "s" : ""} in ${(timing.totalMs / 1000).toFixed(1)}s`
     + (timingParts.length ? ` <span class="timing-detail">(${timingParts.join(", ")})</span>` : "")
     + `</div>`;
 
-  // Render each source as a mini-conversation with the same turn styling as chat view
   const MAX_SOURCE_TEXT = 400;
 
-  const sourcesHtml = sources.map((source) => {
+  const sourcesHtml = sources.map((source, i) => {
+    const num = i + 1;
     const turnCards = source.turns
       .map((turn, j) => {
         if (turn.role !== "human" && turn.role !== "assistant") return "";
@@ -302,9 +563,7 @@ export function buildAskResultsHtml(data: AskPageData): string {
         }
         text = text.trim();
         if (!text) return "";
-        const snippet = text.length > MAX_SOURCE_TEXT
-          ? text.slice(0, MAX_SOURCE_TEXT) + "..."
-          : text;
+        const snippet = text.length > MAX_SOURCE_TEXT ? text.slice(0, MAX_SOURCE_TEXT) + "..." : text;
         const rendered = renderAnswerMarkdown(snippet);
         const href = `/c/${source.sessionId}#turn-${turnIndex}`;
         return `<a class="turn-link" href="${href}"><div class="turn ${roleClass}">
@@ -316,14 +575,14 @@ export function buildAskResultsHtml(data: AskPageData): string {
       .slice(0, 4)
       .join("\n");
 
-    // Shorten project path: "/Users/david/Documents/Programs/foo" → "foo"
     const projectRaw = source.project || "unknown";
     const projectName = projectRaw.split("/").pop() || projectRaw;
     const titleDisplay = source.title ? ` <span class="source-title">${escape(source.title)}</span>` : "";
     const shortId = source.sessionId.slice(0, 8);
 
-    return `<div class="source-block">
+    return `<div class="source-block" id="source-${num}" style="animation-delay:${i * 60}ms">
       <div class="source-header">
+        <span class="source-num">${num}</span>
         <span class="source-project">${escape(projectName)}</span>${titleDisplay}
         <a class="source-link" href="/c/${source.sessionId}#turn-${source.matchTurnIndex}">${shortId}&hellip; &rarr;</a>
       </div>
@@ -363,31 +622,6 @@ export function buildAskPage(data: AskPageData): string {
 <div class="ask-page" id="results">
   ${resultsHtml}
 </div>
-<script>
-(function() {
-  var form = document.querySelector('.ask-search-form');
-  var page = document.getElementById('results');
-  form.addEventListener('submit', function(e) {
-    e.preventDefault();
-    var q = form.querySelector('input[name=q]').value.trim();
-    if (!q) return;
-    history.pushState(null, '', '/ask?q=' + encodeURIComponent(q));
-    document.title = 'Ask — ' + q + ' — Gloss';
-    page.innerHTML = '<div class="ask-loading"><div class="spinner"></div><div>Searching with AI...</div><div class="elapsed"></div></div>';
-    var t0 = Date.now();
-    var el = page.querySelector('.elapsed');
-    var iv = setInterval(function() { el.textContent = Math.round((Date.now()-t0)/1000)+'s'; }, 1000);
-    fetch('/api/ask-html', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({query: q})
-    })
-    .then(function(r) { return r.text(); })
-    .then(function(html) { clearInterval(iv); page.innerHTML = html; })
-    .catch(function(err) { clearInterval(iv); page.innerHTML = '<div class="ask-error">Failed: '+err.message+'</div>'; });
-  });
-})();
-</script>
 </body>
 </html>`;
 }

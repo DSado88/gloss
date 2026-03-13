@@ -742,6 +742,42 @@ export async function handleApiRoute(
     });
   }
 
+  // POST /api/ask-stream — NDJSON streaming: sources first, then Claude chunks
+  if (pathname === "/api/ask-stream" && req.method === "POST") {
+    const body = (await req.json()) as Record<string, unknown>;
+    const q = (body.query as string)?.trim();
+    if (!q) {
+      return new Response(JSON.stringify({ type: "error", message: "No query" }) + "\n", {
+        status: 400, headers: { "Content-Type": "application/x-ndjson" },
+      });
+    }
+    const { askQuestionStream } = await import("./ask.js");
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const event of askQuestionStream(db, q, {
+            vectorIndex: search?.vectorIndex ?? undefined,
+            embeddingEngine: search?.embeddingEngine,
+          })) {
+            controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+          }
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          controller.enqueue(encoder.encode(JSON.stringify({ type: "error", message: msg }) + "\n"));
+        }
+        controller.close();
+      },
+    });
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "application/x-ndjson",
+        "Cache-Control": "no-cache",
+        "Transfer-Encoding": "chunked",
+      },
+    });
+  }
+
   // GET /api/search?q=...
   if (pathname === "/api/search" && req.method === "GET") {
     const url = new URL(req.url);
