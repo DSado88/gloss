@@ -225,141 +225,93 @@ export async function askQuestion(
     });
   }
 
-  // ------------------------------------------------------------------
-  // 1-3: Run metadata, FTS, and Claude extraction in parallel
-  // ------------------------------------------------------------------
-
-  // Start Claude term extraction first (slow, ~10s)
-  const termsPromise = extractSearchTerms(query);
-
-  // Metadata search (instant — sync DB query)
-  const metadataIds = searchMetadata(db, query, maxSources);
-
-  // FTS search with sanitized query (instant — sync DB query)
-  const ftsQuery = sanitizeFtsQuery(query);
-  let sessionHits: Array<{ session_id: string; match_count: number; best_rank: number }> = [];
-  try {
-    sessionHits = db.searchSessions(ftsQuery, maxSources * 4);
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.error(`[ask] FTS error for query "${ftsQuery}": ${msg}`);
-  }
-
-  // Await Claude-extracted terms, then do additional targeted FTS
-  let claudeTerms: string[] = [];
-  try {
-    claudeTerms = await termsPromise;
-    console.log(`[ask] Claude extracted terms: ${claudeTerms.join(", ")}`);
-  } catch { /* non-fatal */ }
-
-  for (const term of claudeTerms) {
-    try {
-      const sanitized = sanitizeFtsQuery(term);
-      if (!sanitized) continue;
-      const hits = db.searchSessions(sanitized, maxSources * 3);
-      sessionHits.push(...hits);
-    } catch { /* skip bad queries */ }
-  }
-
-  const tFts = performance.now();
-
-  // ------------------------------------------------------------------
-  // Merge & deduplicate with unified scoring
-  // ------------------------------------------------------------------
-  // Combine all signals into a single score per session.
-  // FTS rank (negative, lower = better) is primary; metadata match adds a boost;
-  // match count breaks ties.
-  const metadataSet = new Set(metadataIds);
-  const sessionScores = new Map<string, { bestRank: number; totalHits: number; metadataBoost: boolean }>();
-
-  for (const h of sessionHits) {
-    if (isExcluded(h.session_id)) continue;
-    const existing = sessionScores.get(h.session_id);
-    if (existing) {
-      if (h.best_rank < existing.bestRank) existing.bestRank = h.best_rank;
-      // Use max hit count across queries, not sum — avoids double-counting
-      // when the same session matches multiple extracted terms
-      if (h.match_count > existing.totalHits) existing.totalHits = h.match_count;
-    } else {
-      sessionScores.set(h.session_id, {
-        bestRank: h.best_rank,
-        totalHits: h.match_count,
-        metadataBoost: metadataSet.has(h.session_id),
-      });
-    }
-  }
-  // Add metadata-only sessions (no FTS hits) with a neutral rank
-  for (const id of metadataIds) {
-    if (!sessionScores.has(id) && !isExcluded(id)) {
-      sessionScores.set(id, { bestRank: 0, totalHits: 0, metadataBoost: true });
+  // Helper: merge hits into a session scores map
+  function mergeHits(
+    hits: Array<{ session_id: string; match_count: number; best_rank: number }>,
+    scores: Map<string, { bestRank: number; totalHits: number; metadataBoost: boolean }>,
+    metaSet: Set<string>,
+  ): void {
+    for (const h of hits) {
+      if (isExcluded(h.session_id)) continue;
+      const existing = scores.get(h.session_id);
+      if (existing) {
+        if (h.best_rank < existing.bestRank) existing.bestRank = h.best_rank;
+        // Use max hit count across queries, not sum — avoids double-counting
+        // when the same session matches multiple extracted terms
+        if (h.match_count > existing.totalHits) existing.totalHits = h.match_count;
+      } else {
+        scores.set(h.session_id, {
+          bestRank: h.best_rank,
+          totalHits: h.match_count,
+          metadataBoost: metaSet.has(h.session_id),
+        });
+      }
     }
   }
 
-  // Two-pass selection: first guarantee metadata matches get slots (they matched
-  // project name/title which is high-signal), then fill remaining slots by score.
-  // Score combines FTS rank with hit count: more hits = more relevant content.
-  function computeScore(s: { bestRank: number; totalHits: number; metadataBoost: boolean }): number {
-    const hitsBoost = s.totalHits > 1 ? Math.log2(s.totalHits) * 1.5 : 0;
-    return s.bestRank - hitsBoost;
+  // Helper: select top session IDs from a scores map
+  function selectTopSessions(
+    scores: Map<string, { bestRank: number; totalHits: number; metadataBoost: boolean }>,
+    metaIds: string[],
+    limit: number,
+  ): string[] {
+    // Two-pass selection: first guarantee metadata matches get slots (they matched
+    // project name/title which is high-signal), then fill remaining slots by score.
+    function computeScore(s: { bestRank: number; totalHits: number; metadataBoost: boolean }): number {
+      const hitsBoost = s.totalHits > 1 ? Math.log2(s.totalHits) * 1.5 : 0;
+      return s.bestRank - hitsBoost;
+    }
+
+    const metadataEntries = [...scores.entries()]
+      .filter(([, s]) => s.metadataBoost)
+      .sort((a, b) => computeScore(a[1]) - computeScore(b[1]));
+    const ftsEntries = [...scores.entries()]
+      .filter(([, s]) => !s.metadataBoost)
+      .sort((a, b) => computeScore(a[1]) - computeScore(b[1]));
+
+    // Reserve up to half the slots for metadata, fill rest with FTS
+    const metadataSlots = Math.min(metadataEntries.length, Math.ceil(limit / 2));
+    const ftsSlots = limit - metadataSlots;
+
+    const selectedMeta = metadataEntries.slice(0, metadataSlots).map(([id]) => id);
+    const selectedFts = ftsEntries
+      .filter(([id]) => !selectedMeta.includes(id))
+      .slice(0, ftsSlots)
+      .map(([id]) => id);
+
+    return [...selectedMeta, ...selectedFts];
   }
 
-  const metadataEntries = [...sessionScores.entries()]
-    .filter(([, s]) => s.metadataBoost)
-    .sort((a, b) => computeScore(a[1]) - computeScore(b[1]));
-  const ftsEntries = [...sessionScores.entries()]
-    .filter(([, s]) => !s.metadataBoost)
-    .sort((a, b) => computeScore(a[1]) - computeScore(b[1]));
-
-  // Reserve up to half the slots for metadata, fill rest with FTS
-  const metadataSlots = Math.min(metadataEntries.length, Math.ceil(maxSources / 2));
-  const ftsSlots = maxSources - metadataSlots;
-
-  const selectedMeta = metadataEntries.slice(0, metadataSlots).map(([id]) => id);
-  const selectedFts = ftsEntries
-    .filter(([id]) => !selectedMeta.includes(id))
-    .slice(0, ftsSlots)
-    .map(([id]) => id);
-
-  const finalSessionIds = [...selectedMeta, ...selectedFts];
-
-  console.log(`[ask] Selected ${finalSessionIds.length} sessions: ${metadataSlots} metadata + ${selectedFts.length} FTS`);
-
-  // ------------------------------------------------------------------
-  // 3. Load turn context
-  // ------------------------------------------------------------------
-  const sources: AskSource[] = [];
-
-  for (const sessionId of finalSessionIds) {
+  // Helper: load context for a single session (async for file I/O parallelism)
+  async function loadSessionContext(
+    sessionId: string,
+    keywords: string[],
+  ): Promise<AskSource[]> {
     const session = db.getSession(sessionId);
-    if (!session?.jsonl_path) continue;
+    if (!session?.jsonl_path) return [];
 
     // Skip files that are too large or missing
     let stat: fs.Stats;
     try {
       stat = fs.statSync(session.jsonl_path);
     } catch {
-      continue;
+      return [];
     }
-    if (stat.size > MAX_FILE_SIZE) continue;
+    if (stat.size > MAX_FILE_SIZE) return [];
 
-    // Parse the JSONL
+    // Parse the JSONL — use async file read for parallelism
     let allTurns: Turn[];
     try {
-      const content = fs.readFileSync(session.jsonl_path, "utf-8");
+      const file = Bun.file(session.jsonl_path);
+      const content = await file.text();
       const parser = new IncrementalParser();
       parser.feedLines(content.split("\n"));
       allTurns = parser.getTurns();
     } catch {
-      continue;
+      return [];
     }
 
     // Find turns matching query keywords via simple text search
-    // Combine FTS tokens + Claude-extracted terms for better matching
-    const allTerms = new Set([
-      ...ftsQuery.toLowerCase().split(/\s+/).filter((t) => t !== "OR" && t.length > 1),
-      ...claudeTerms.map((t) => t.toLowerCase()),
-    ]);
-    const keywords = [...allTerms];
     const matchingIndices: number[] = [];
     for (let i = 0; i < allTurns.length; i++) {
       const text = turnToPlainText(allTurns[i]).toLowerCase();
@@ -393,10 +345,11 @@ export async function askQuestion(
       }
     }
 
+    const results: AskSource[] = [];
     for (const [lo, hi] of merged) {
       const turnSlice = allTurns.slice(lo, hi + 1);
       const matchIdx = topMatches.find((i) => i >= lo && i <= hi) ?? lo;
-      sources.push({
+      results.push({
         sessionId,
         project: session.project ?? "unknown",
         title: session.title ?? sessionId.slice(0, 8),
@@ -405,6 +358,130 @@ export async function askQuestion(
         startTurnIndex: lo,
       });
     }
+    return results;
+  }
+
+  // ------------------------------------------------------------------
+  // 1. Fire Claude term extraction (slow, ~10s) — DON'T AWAIT YET
+  // ------------------------------------------------------------------
+  const termsPromise = extractSearchTerms(query);
+
+  // ------------------------------------------------------------------
+  // 2. Run FTS + metadata search (sync, instant)
+  // ------------------------------------------------------------------
+
+  // Metadata search (instant — sync DB query)
+  const metadataIds = searchMetadata(db, query, maxSources);
+
+  // FTS search with sanitized query (instant — sync DB query)
+  const ftsQuery = sanitizeFtsQuery(query);
+  const initialHits: Array<{ session_id: string; match_count: number; best_rank: number }> = [];
+  try {
+    initialHits.push(...db.searchSessions(ftsQuery, maxSources * 4));
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[ask] FTS error for query "${ftsQuery}": ${msg}`);
+  }
+
+  const tFts = performance.now();
+
+  // ------------------------------------------------------------------
+  // 3. Initial RRF merge WITHOUT Claude terms
+  // ------------------------------------------------------------------
+  const metadataSet = new Set(metadataIds);
+  const initialScores = new Map<string, { bestRank: number; totalHits: number; metadataBoost: boolean }>();
+
+  mergeHits(initialHits, initialScores, metadataSet);
+
+  // Add metadata-only sessions (no FTS hits) with a neutral rank
+  for (const id of metadataIds) {
+    if (!initialScores.has(id) && !isExcluded(id)) {
+      initialScores.set(id, { bestRank: 0, totalHits: 0, metadataBoost: true });
+    }
+  }
+
+  const initialSessionIds = selectTopSessions(initialScores, metadataIds, maxSources);
+
+  console.log(`[ask] Initial selection (pre-Claude terms): ${initialSessionIds.length} sessions`);
+
+  // ------------------------------------------------------------------
+  // 4. Start context loading in PARALLEL with Claude term extraction
+  // ------------------------------------------------------------------
+  // Use FTS-only keywords for initial context matching (Claude terms not ready yet)
+  const ftsKeywords = ftsQuery.toLowerCase().split(/\s+/).filter((t) => t !== "OR" && t.length > 1);
+
+  const contextPromise = Promise.all(
+    initialSessionIds.map((id) => loadSessionContext(id, ftsKeywords)),
+  );
+
+  // ------------------------------------------------------------------
+  // 5. Await Claude terms (likely already resolved by now, ~10s elapsed)
+  // ------------------------------------------------------------------
+  let claudeTerms: string[] = [];
+  try {
+    claudeTerms = await termsPromise;
+    console.log(`[ask] Claude extracted terms: ${claudeTerms.join(", ")}`);
+  } catch { /* non-fatal */ }
+
+  // ------------------------------------------------------------------
+  // 6. Await initial context loading
+  // ------------------------------------------------------------------
+  const initialSourceArrays = await contextPromise;
+  const sources: AskSource[] = initialSourceArrays.flat();
+
+  // ------------------------------------------------------------------
+  // 7. Check if Claude terms reveal additional sessions not in initial set
+  // ------------------------------------------------------------------
+  const initialSet = new Set(initialSessionIds);
+  const claudeHits: Array<{ session_id: string; match_count: number; best_rank: number }> = [];
+
+  for (const term of claudeTerms) {
+    try {
+      const sanitized = sanitizeFtsQuery(term);
+      if (!sanitized) continue;
+      const hits = db.searchSessions(sanitized, maxSources * 3);
+      claudeHits.push(...hits);
+    } catch { /* skip bad queries */ }
+  }
+
+  if (claudeHits.length > 0) {
+    // Rebuild scores with all hits (initial + Claude-derived)
+    const fullScores = new Map<string, { bestRank: number; totalHits: number; metadataBoost: boolean }>();
+    mergeHits(initialHits, fullScores, metadataSet);
+    mergeHits(claudeHits, fullScores, metadataSet);
+
+    // Add metadata-only sessions
+    for (const id of metadataIds) {
+      if (!fullScores.has(id) && !isExcluded(id)) {
+        fullScores.set(id, { bestRank: 0, totalHits: 0, metadataBoost: true });
+      }
+    }
+
+    const finalSessionIds = selectTopSessions(fullScores, metadataIds, maxSources);
+
+    // Find NEW sessions that Claude terms surfaced (not in initial set)
+    const newSessionIds = finalSessionIds.filter((id) => !initialSet.has(id));
+
+    if (newSessionIds.length > 0) {
+      console.log(`[ask] Claude terms surfaced ${newSessionIds.length} additional sessions`);
+
+      // Combine FTS + Claude keywords for richer matching in new sessions
+      const allKeywords = [
+        ...ftsKeywords,
+        ...claudeTerms.map((t) => t.toLowerCase()),
+      ];
+      const uniqueKeywords = [...new Set(allKeywords)];
+
+      // Load additional contexts in parallel
+      const additionalSourceArrays = await Promise.all(
+        newSessionIds.map((id) => loadSessionContext(id, uniqueKeywords)),
+      );
+      sources.push(...additionalSourceArrays.flat());
+    }
+
+    console.log(`[ask] Final selection: ${finalSessionIds.length} sessions (${initialSessionIds.length} initial + ${newSessionIds.length} new)`);
+  } else {
+    console.log(`[ask] Final selection: ${initialSessionIds.length} sessions (no additional from Claude terms)`);
   }
 
   // ------------------------------------------------------------------
