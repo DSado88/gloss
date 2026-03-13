@@ -178,8 +178,7 @@ export class IncrementalParser {
       if (msgType === "user" && hasToolResults && !hasUserText) {
         if (this.currentTurn && this.currentTurn.role === "assistant") {
           this.currentTurn.blocks.push(...parsedBlocks);
-          const idx = this.turns.indexOf(this.currentTurn);
-          updates.push({ type: "update_turn", turnIndex: idx, turn: this.currentTurn });
+          updates.push({ type: "update_turn", turnIndex: this.turns.length - 1, turn: this.currentTurn });
           continue;
         }
       }
@@ -189,8 +188,7 @@ export class IncrementalParser {
       // Merge consecutive same-role messages into one turn
       if (this.currentTurn && this.currentTurn.role === role) {
         this.currentTurn.blocks.push(...parsedBlocks);
-        const idx = this.turns.indexOf(this.currentTurn);
-        updates.push({ type: "update_turn", turnIndex: idx, turn: this.currentTurn });
+        updates.push({ type: "update_turn", turnIndex: this.turns.length - 1, turn: this.currentTurn });
       } else {
         this.currentTurn = { role, timestamp, blocks: parsedBlocks };
         this.turns.push(this.currentTurn);

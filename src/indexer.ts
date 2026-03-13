@@ -9,14 +9,20 @@ import type { TextBlock } from "./types.js";
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Max file size for embedding indexing (100MB). Larger files skipped. */
-const EMBEDDING_INDEX_LIMIT = 100 * 1024 * 1024;
+/** Max file size for embedding indexing (50MB). Larger files skipped to avoid blocking. */
+const EMBEDDING_INDEX_LIMIT = 50 * 1024 * 1024;
+
+/** Min file size worth embedding (10KB). Filters out trivial/empty sessions. */
+const EMBEDDING_MIN_SIZE = 10 * 1024;
 
 /** Max characters per turn to embed (practical truncation limit). */
 const MAX_TURN_CHARS = 2000;
 
 /** Number of turns per embedding batch call. */
-const DEFAULT_BATCH_SIZE = 32;
+const EMBED_BATCH_SIZE = 16;
+
+/** ms to sleep between embedding batches. */
+const YIELD_MS = 50;
 
 // ---------------------------------------------------------------------------
 // Turn text extraction
@@ -36,13 +42,20 @@ function textHash(text: string): string {
   return crypto.createHash("sha256").update(text).digest("hex");
 }
 
+/** Sleep helper that actually yields to the event loop. */
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 // ---------------------------------------------------------------------------
 // Background embedding indexer
 // ---------------------------------------------------------------------------
 
+/** Guard against concurrent backfill runs. */
+let embeddingBackfillRunning = false;
+
 /**
  * Background embedding indexer. Scans sessions and generates embeddings.
- * Modeled after backfillFtsIndex() in discovery.ts.
+ * Yields to the event loop between every embedding batch to keep the
+ * server responsive during backfill.
  */
 export function backfillEmbeddings(
   db: ConvoDb,
@@ -50,6 +63,7 @@ export function backfillEmbeddings(
   vectorIndex: VectorIndex | null,
   options?: {
     batchSize?: number;
+    minTurns?: number;
     onProgress?: (indexed: number, total: number) => void;
   },
 ): void {
@@ -58,23 +72,49 @@ export function backfillEmbeddings(
     return;
   }
 
-  const batchSize = options?.batchSize ?? DEFAULT_BATCH_SIZE;
+  if (embeddingBackfillRunning) {
+    return; // Previous run still in progress
+  }
+  embeddingBackfillRunning = true;
 
-  // listSessions returns sessions ordered by last_modified DESC,
-  // so recent conversations get embedded first during initial backfill.
+  const batchSize = options?.batchSize ?? EMBED_BATCH_SIZE;
+
+  // Kick off the async loop
+  (async () => {
+    try {
+      await runBackfill(db, engine, vectorIndex, batchSize, options?.minTurns ?? 3, options?.onProgress);
+    } catch (err) {
+      console.error("[embeddings] Backfill crashed:", err);
+    } finally {
+      embeddingBackfillRunning = false;
+    }
+  })();
+}
+
+async function runBackfill(
+  db: ConvoDb,
+  engine: EmbeddingEngine,
+  vectorIndex: VectorIndex | null,
+  batchSize: number,
+  minTurns: number,
+  onProgress?: (indexed: number, total: number) => void,
+): Promise<void> {
   const sessions = db.listSessions({}) as Array<{
     id: string;
     jsonl_path?: string | null;
     file_size?: number | null;
+    turn_count?: number | null;
   }>;
 
-  // Find sessions needing embedding
+  // Find sessions needing embedding — skip sessions below the turn threshold
+  const threshold = minTurns > 0 ? minTurns : 3;
   const needsIndexing: Array<{ id: string; jsonl_path: string; mtime: number }> = [];
   for (const s of sessions) {
     if (!s.jsonl_path) continue;
+    if ((s.turn_count ?? 0) < threshold) continue;
     try {
       const stat = fs.statSync(s.jsonl_path);
-      if (!stat.isFile() || stat.size > EMBEDDING_INDEX_LIMIT) continue;
+      if (!stat.isFile() || stat.size > EMBEDDING_INDEX_LIMIT || stat.size < EMBEDDING_MIN_SIZE) continue;
       const mtime = Math.floor(stat.mtimeMs / 1000);
       if (db.embeddingNeedsIndexing(s.id, mtime)) {
         needsIndexing.push({ id: s.id, jsonl_path: s.jsonl_path, mtime });
@@ -89,19 +129,13 @@ export function backfillEmbeddings(
   // Sort by mtime descending so recent conversations get embedded first
   needsIndexing.sort((a, b) => b.mtime - a.mtime);
 
-  console.log(`Embedding ${needsIndexing.length} sessions...`);
-  let i = 0;
+  console.log(`[embeddings] Backfill: ${needsIndexing.length} sessions to index`);
   let indexed = 0;
   let totalTurns = 0;
+  const startTime = Date.now();
 
-  const processSession = async () => {
-    if (i >= needsIndexing.length) {
-      console.log(`Embeddings: ${indexed} sessions indexed (${totalTurns} turns)`);
-      return;
-    }
-
-    const s = needsIndexing[i];
-    i++;
+  for (let cursor = 0; cursor < needsIndexing.length; cursor++) {
+    const s = needsIndexing[cursor];
 
     try {
       const content = fs.readFileSync(s.jsonl_path, "utf-8");
@@ -123,12 +157,9 @@ export function backfillEmbeddings(
         });
       }
 
-      if (turnTexts.length === 0) {
-        setTimeout(processSession, 10);
-        return;
-      }
+      if (turnTexts.length === 0) continue;
 
-      // Embed in batches
+      // Embed in batches, yielding between each to keep server responsive
       const entries: Array<{
         turnIndex: number;
         role: string;
@@ -139,7 +170,7 @@ export function backfillEmbeddings(
       for (let b = 0; b < turnTexts.length; b += batchSize) {
         const batch = turnTexts.slice(b, b + batchSize);
         const texts = batch.map((t) => t.text);
-        const embeddings = await engine.embed(texts);
+        const embeddings = await engine.embedOffThread(texts);
         for (let j = 0; j < batch.length; j++) {
           entries.push({
             turnIndex: batch[j].index,
@@ -148,12 +179,14 @@ export function backfillEmbeddings(
             embedding: embeddings[j],
           });
         }
+        // Yield to event loop between every batch
+        await sleep(YIELD_MS);
       }
 
       // Store in DB
       db.storeEmbeddings(s.id, entries, s.mtime);
 
-      // Update in-memory vector index if available
+      // Update in-memory vector index
       if (vectorIndex) {
         vectorIndex.addSession(
           s.id,
@@ -167,15 +200,23 @@ export function backfillEmbeddings(
 
       indexed++;
       totalTurns += entries.length;
-      options?.onProgress?.(indexed, needsIndexing.length);
+      onProgress?.(indexed, needsIndexing.length);
+
+      // Log progress every 50 sessions
+      if (indexed % 50 === 0) {
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
+        const rate = (indexed / ((Date.now() - startTime) / 60000)).toFixed(0);
+        console.log(`[embeddings] Progress: ${indexed}/${needsIndexing.length} sessions (${totalTurns} turns, ${elapsed}s, ${rate}/min)`);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[embeddings] Error indexing session ${s.id}: ${msg}`);
     }
 
-    // Yield to event loop between sessions
-    setTimeout(processSession, 10);
-  };
+    // Yield between sessions too
+    await sleep(10);
+  }
 
-  processSession();
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
+  console.log(`[embeddings] Done: ${indexed} sessions indexed (${totalTurns} turns) in ${elapsed}s`);
 }

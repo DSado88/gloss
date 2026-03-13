@@ -330,7 +330,8 @@ function decodeProjectDir(encoded: string): string {
  * Build an index page from session records (SQLite), for server mode.
  * Default view: flat list of recent sessions. Search filters by project/model/id.
  */
-export function buildServerIndex(sessions: SessionRecord[]): string {
+export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddings_enabled?: boolean; min_turns?: number }): string {
+  const cfg = { embeddings_enabled: false, min_turns: 0, ...settings };
   const sessionsJson = JSON.stringify(
     sessions.map((s) => {
       // Decode the JSONL directory to a readable project name
@@ -358,6 +359,7 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
         last_modified: s.last_modified ?? s.start_time ?? 0,
         turn_count: s.turn_count ?? 0,
         file_size: s.file_size ?? 0,
+        hidden: s.hidden ?? 0,
       };
     }),
   );
@@ -396,6 +398,28 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
       --logo-invert: none;
     }
   }
+  [data-theme="light"] {
+    --bg: #f6f8fa;
+    --surface: #ffffff;
+    --surface2: #f0f2f5;
+    --text: #1f2328;
+    --text2: #656d76;
+    --border: #d0d7de;
+    --accent: #c2613a;
+    --accent2: #c2613a15;
+    --logo-invert: none;
+  }
+  [data-theme="dark"] {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #21262d;
+    --text: #e6edf3;
+    --text2: #7d8590;
+    --border: #30363d;
+    --accent: #da7756;
+    --accent2: #da775620;
+    --logo-invert: invert(1);
+  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -403,7 +427,7 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
     color: var(--text);
     -webkit-font-smoothing: antialiased;
     padding: 32px 24px;
-    max-width: 1000px;
+    max-width: 1100px;
     margin: 0 auto;
   }
   .header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; }
@@ -447,8 +471,8 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
   }
   .session-row {
     display: grid;
-    grid-template-columns: 160px 1fr 100px 60px 70px;
-    gap: 12px;
+    grid-template-columns: 120px 1fr 80px 50px 60px;
+    gap: 10px;
     align-items: center;
     padding: 10px 14px;
     background: var(--surface);
@@ -478,9 +502,12 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
     font-family: 'SF Mono', 'Fira Code', monospace;
     font-size: 0.78rem;
     color: var(--accent);
+    white-space: nowrap;
+    flex-shrink: 0;
   }
   .s-meta { font-size: 0.78rem; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .s-title { font-size: 0.78rem; color: #5eead4; font-weight: 500; margin-left: 6px; }
+  .s-session { display: flex; align-items: center; overflow: hidden; min-width: 0; flex-wrap: nowrap; }
+  .s-title { font-size: 0.78rem; color: #5eead4; font-weight: 500; margin-left: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .s-fts { font-size: 0.7rem; color: var(--accent); margin-left: 6px; opacity: 0.8; }
   @media (prefers-color-scheme: light) { .s-title { color: #0f766e; } }
   .s-time { font-size: 0.78rem; color: var(--text2); white-space: nowrap; }
@@ -510,10 +537,26 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
   .project-group.collapsed .project-arrow { transform: rotate(-90deg); }
   .project-group.collapsed .group-sessions { display: none; }
   .group-sessions { background: var(--border); display: flex; flex-direction: column; gap: 1px; }
-  .group-sessions .session-row { grid-template-columns: 1fr 100px 60px 70px; }
+  .group-sessions .session-row { grid-template-columns: 1fr 80px 50px 60px; }
   .group-sessions .s-project { display: none; }
 
   .empty { text-align: center; padding: 40px; color: var(--text2); }
+  .s-actions {
+    display: flex; gap: 2px; align-items: center; opacity: 0; transition: opacity 0.1s;
+    margin-left: auto; flex-shrink: 0;
+  }
+  .session-row:hover .s-actions { opacity: 1; }
+  .s-actions button {
+    background: none; border: none; color: var(--text2); cursor: pointer;
+    padding: 2px 5px; font-size: 0.75rem; border-radius: 3px; line-height: 1;
+  }
+  .s-actions button:hover { background: var(--surface2); color: var(--text); }
+  .session-row.hidden-row { opacity: 0.4; }
+  .rename-input {
+    background: var(--surface2); border: 1px solid var(--accent); border-radius: 3px;
+    color: var(--text); font-size: 0.78rem; padding: 1px 6px; width: 200px;
+    outline: none; font-family: inherit;
+  }
 
   /* Project filter dropdown */
   .filter-wrap { position: relative; }
@@ -562,11 +605,57 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
   }
   .filter-search:focus { border-color: var(--accent); }
 
-  @media (max-width: 640px) {
-    .session-row { grid-template-columns: 140px 1fr 50px; }
-    .s-meta, .s-size { display: none; }
-    .group-sessions .session-row { grid-template-columns: 1fr 50px; }
-    .s-time { display: none; }
+  /* Settings panel */
+  .settings-wrap { position: relative; }
+  .settings-drop {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    min-width: 280px;
+    z-index: 100;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  }
+  .settings-drop.open { display: block; }
+  .settings-drop h3 { font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text2); margin-bottom: 10px; }
+  .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+  .setting-row:last-child { margin-bottom: 0; }
+  .setting-label { font-size: 0.82rem; color: var(--text); }
+  .setting-note { font-size: 0.72rem; color: var(--text2); margin-top: 2px; line-height: 1.3; }
+  .setting-toggle {
+    position: relative; width: 36px; height: 20px; background: var(--surface2);
+    border: 1px solid var(--border); border-radius: 10px; cursor: pointer; flex-shrink: 0;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .setting-toggle.on { background: var(--accent); border-color: var(--accent); }
+  .setting-toggle::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 14px; height: 14px; background: #fff; border-radius: 50%;
+    transition: transform 0.15s;
+  }
+  .setting-toggle.on::after { transform: translateX(16px); }
+  .setting-num {
+    width: 60px; height: 28px; padding: 0 8px; text-align: center;
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text); font-size: 0.82rem; outline: none;
+  }
+  .setting-num:focus { border-color: var(--accent); }
+  .setting-saved {
+    font-size: 0.72rem; color: var(--accent); opacity: 0; transition: opacity 0.2s;
+    margin-left: 6px;
+  }
+  .setting-saved.show { opacity: 1; }
+
+  @media (max-width: 700px) {
+    .session-row { grid-template-columns: 1fr 60px 50px; }
+    .s-project, .s-size { display: none; }
+    .session-row.table-header { display: none; }
+    .group-sessions .session-row { grid-template-columns: 1fr 60px 50px; }
   }
 </style>
 </head>
@@ -579,21 +668,57 @@ export function buildServerIndex(sessions: SessionRecord[]): string {
     <input class="search" id="search" type="text" placeholder="Search or ask a question..." autofocus>
     <button class="view-btn" id="askBtn" onclick="askAI()" style="display:none">Ask AI</button>
     <button class="view-btn" id="groupBtn" onclick="toggleGroup()">Group projects</button>
+    <button class="view-btn" id="hiddenBtn" onclick="toggleShowHidden()">Show hidden</button>
     <div class="filter-wrap">
       <button class="view-btn filter-btn" id="filterBtn" onclick="toggleFilter()">Filter projects</button>
       <div class="filter-drop" id="filterDrop"></div>
+    </div>
+    <div class="settings-wrap">
+      <button class="view-btn" id="settingsBtn" onclick="toggleSettings()">Settings</button>
+      <div class="settings-drop" id="settingsDrop">
+        <h3>Settings</h3>
+        <div>
+          <div class="setting-row">
+            <div>
+              <div class="setting-label">Semantic search</div>
+              <div class="setting-note" id="embeddingsNote"></div>
+            </div>
+            <div class="setting-toggle" id="embeddingsToggle" onclick="toggleEmbeddings()"></div>
+          </div>
+        </div>
+        <div id="minTurnsRow" style="margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border)">
+          <div class="setting-row">
+            <div class="setting-label" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              Skip sessions under <input class="setting-num" id="minTurnsInput" type="number" min="0" step="1" style="width:48px"> turns
+            </div>
+          </div>
+        </div>
+        <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border)">
+          <div class="setting-row">
+            <div class="setting-label">Theme</div>
+            <div style="display:flex;gap:4px">
+              <button class="view-btn theme-opt" data-theme="auto" onclick="setTheme('auto')" style="padding:4px 8px;font-size:0.75rem">Auto</button>
+              <button class="view-btn theme-opt" data-theme="light" onclick="setTheme('light')" style="padding:4px 8px;font-size:0.75rem">Light</button>
+              <button class="view-btn theme-opt" data-theme="dark" onclick="setTheme('dark')" style="padding:4px 8px;font-size:0.75rem">Dark</button>
+            </div>
+          </div>
+        </div>
+        <span class="setting-saved" id="settingSaved">Saved</span>
+      </div>
     </div>
   </div>
   <div id="content"></div>
 
 <script>
 const ALL = ${sessionsJson};
+const SETTINGS = ${JSON.stringify(cfg)};
 let grouped = false;
 let query = '';
 let showCount = 80;
 let mutedProjects = new Set(JSON.parse(localStorage.getItem('gloss_muted_projects') || '[]'));
 let sortCol = 'last_modified';
 let sortDir = -1; // -1 = descending, 1 = ascending
+let showHidden = false;
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
@@ -648,6 +773,9 @@ function sortArrow(col) {
 
 function filter(list) {
   let out = list;
+  if (!showHidden) {
+    out = out.filter(s => !s.hidden);
+  }
   if (mutedProjects.size) {
     out = out.filter(s => {
       const key = s.project || s.dirProject || 'Unknown';
@@ -687,12 +815,16 @@ function renderRecent(filtered) {
   html += '</div>';
   for (const s of visible) {
     const proj = esc(s.project || s.dirProject || '—');
-    const model = shortModel(s.model);
-    html += '<a class="session-row" href="/c/' + s.id + '">';
+    const hiddenCls = s.hidden ? ' hidden-row' : '';
+    html += '<a class="session-row' + hiddenCls + '" href="/c/' + s.id + '">';
     html += '<span class="s-project" title="' + esc(s.fullProject) + '">' + proj + '</span>';
-    const titleBit = s.title ? ' <span class="s-title">' + esc(s.title) + '</span>' : '';
-    const ftsBit = s._ftsMatch ? ' <span class="s-fts">' + s._ftsMatch + ' matches</span>' : '';
-    html += '<span><span class="s-id">' + s.id + '</span>' + titleBit + ftsBit + '</span>';
+    const titleBit = s.title ? '<span class="s-title">' + esc(s.title) + '</span>' : '';
+    const ftsBit = s._ftsMatch ? '<span class="s-fts">' + s._ftsMatch + ' matches</span>' : '';
+    html += '<span class="s-session"><span class="s-id">' + s.id + '</span>' + titleBit + ftsBit;
+    html += '<span class="s-actions">';
+    html += '<button onclick="renameSession(\\'' + s.id + '\\',event)" title="Rename">✎</button>';
+    html += '<button onclick="hideSession(\\'' + s.id + '\\',event)" title="' + (s.hidden ? 'Unhide' : 'Hide') + '">' + (s.hidden ? '◉' : '◎') + '</button>';
+    html += '</span></span>';
     html += '<span class="s-time">' + fmtTime(s.last_modified) + '</span>';
     html += '<span class="s-turns">' + (s.turn_count || '—') + '</span>';
     html += '<span class="s-size">' + fmtSize(s.file_size) + '</span>';
@@ -727,11 +859,16 @@ function renderByProject(filtered) {
     html += '</div>';
     html += '<div class="group-sessions">';
     for (const s of sessions) {
-      const model = shortModel(s.model);
-      html += '<a class="session-row" href="/c/' + s.id + '">';
+      const hiddenCls = s.hidden ? ' hidden-row' : '';
+      html += '<a class="session-row' + hiddenCls + '" href="/c/' + s.id + '">';
       html += '<span class="s-project">' + esc(name) + '</span>';
-      const titleBit = s.title ? ' <span class="s-title">' + esc(s.title) + '</span>' : '';
-      html += '<span><span class="s-id">' + s.id + '</span>' + titleBit + '</span>';
+      const titleBit = s.title ? '<span class="s-title">' + esc(s.title) + '</span>' : '';
+      const ftsBit = s._ftsMatch ? '<span class="s-fts">' + s._ftsMatch + ' matches</span>' : '';
+      html += '<span class="s-session"><span class="s-id">' + s.id + '</span>' + titleBit + ftsBit;
+      html += '<span class="s-actions">';
+      html += '<button onclick="renameSession(\\'' + s.id + '\\',event)" title="Rename">✎</button>';
+      html += '<button onclick="hideSession(\\'' + s.id + '\\',event)" title="' + (s.hidden ? 'Unhide' : 'Hide') + '">' + (s.hidden ? '◉' : '◎') + '</button>';
+      html += '</span></span>';
       html += '<span class="s-time">' + fmtTime(s.last_modified) + '</span>';
       html += '<span class="s-turns">' + (s.turn_count || '—') + '</span>';
       html += '<span class="s-size">' + fmtSize(s.file_size) + '</span>';
@@ -773,9 +910,11 @@ function render() {
     }
   }
 
+  const hiddenCount = ALL.filter(s => s.hidden).length;
+  const hiddenLabel = !showHidden && hiddenCount ? ' (' + hiddenCount + ' hidden)' : '';
   const label = query
-    ? filtered.length + ' of ' + unmuted + (ftsExtra ? ' (' + ftsExtra + ' from content search)' : '')
-    : (mutedProjects.size ? unmuted + ' of ' + ALL.length : '' + ALL.length);
+    ? filtered.length + ' of ' + unmuted + (ftsExtra ? ' (' + ftsExtra + ' from content search)' : '') + hiddenLabel
+    : (mutedProjects.size ? unmuted + ' of ' + ALL.length : '' + ALL.length) + hiddenLabel;
   document.getElementById('count').textContent = label + ' sessions';
 
   if (filtered.length === 0) {
@@ -931,6 +1070,160 @@ document.addEventListener('click', function(e) {
 
 // Init filter button state
 document.getElementById('filterBtn').classList.toggle('has-muted', mutedProjects.size > 0);
+
+function toggleShowHidden() {
+  showHidden = !showHidden;
+  document.getElementById('hiddenBtn').classList.toggle('active', showHidden);
+  showCount = 80;
+  render();
+}
+
+function renameSession(id, e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const row = e.target.closest('.session-row');
+  if (!row) return;
+  const sess = ALL.find(s => s.id === id);
+  const oldTitle = sess ? sess.title : '';
+
+  const cell = row.querySelector('.s-session');
+  if (!cell) return;
+  const titleSpan = cell.querySelector('.s-title');
+
+  const input = document.createElement('input');
+  input.className = 'rename-input';
+  input.value = oldTitle;
+  input.placeholder = 'Enter title...';
+
+  if (titleSpan) titleSpan.style.display = 'none';
+  cell.appendChild(input);
+  input.focus();
+  input.select();
+
+  function finish() {
+    const val = input.value.trim();
+    input.remove();
+    if (titleSpan) titleSpan.style.display = '';
+    if (val !== oldTitle) {
+      fetch('/api/sessions/' + id + '/title', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: val })
+      }).then(() => {
+        if (sess) sess.title = val;
+        render();
+      });
+    }
+  }
+
+  input.addEventListener('keydown', function(ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); finish(); }
+    if (ev.key === 'Escape') { input.remove(); if (titleSpan) titleSpan.style.display = ''; }
+  });
+  input.addEventListener('blur', finish);
+}
+
+function hideSession(id, e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const sess = ALL.find(s => s.id === id);
+  const newHidden = sess && sess.hidden ? 0 : 1;
+  fetch('/api/sessions/' + id + '/hidden', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hidden: !!newHidden })
+  }).then(() => {
+    if (sess) sess.hidden = newHidden;
+    render();
+  });
+}
+
+// --- Settings ---
+function toggleSettings() {
+  const drop = document.getElementById('settingsDrop');
+  const isOpen = drop.classList.toggle('open');
+  if (isOpen) initSettings();
+}
+
+function initSettings() {
+  document.getElementById('minTurnsInput').value = SETTINGS.min_turns || '';
+  const toggle = document.getElementById('embeddingsToggle');
+  toggle.classList.toggle('on', SETTINGS.embeddings_enabled);
+  updateEmbeddingsNote();
+  updateEmbeddingsUI();
+}
+
+function updateEmbeddingsNote() {
+  const note = document.getElementById('embeddingsNote');
+  if (SETTINGS.embeddings_enabled) {
+    note.textContent = 'Enabled — powers AI-powered search across conversations';
+  } else {
+    note.textContent = 'Enable to search conversation content with AI. Requires a server restart and can take 1\\u20132 hours depending on backlog size.';
+  }
+}
+
+function toggleEmbeddings() {
+  SETTINGS.embeddings_enabled = !SETTINGS.embeddings_enabled;
+  const toggle = document.getElementById('embeddingsToggle');
+  toggle.classList.toggle('on', SETTINGS.embeddings_enabled);
+  updateEmbeddingsNote();
+  updateEmbeddingsUI();
+  saveSetting('embeddings_enabled', SETTINGS.embeddings_enabled);
+}
+
+function updateEmbeddingsUI() {
+  document.getElementById('minTurnsRow').style.display = SETTINGS.embeddings_enabled ? '' : 'none';
+  document.getElementById('search').placeholder = SETTINGS.embeddings_enabled ? 'Search or ask a question...' : 'Search...';
+}
+
+let minTurnsTimer = null;
+document.getElementById('minTurnsInput').addEventListener('input', function(e) {
+  const val = Math.max(0, parseInt(e.target.value) || 0);
+  SETTINGS.min_turns = val;
+  clearTimeout(minTurnsTimer);
+  minTurnsTimer = setTimeout(() => saveSetting('min_turns', val), 500);
+});
+
+function saveSetting(key, value) {
+  const body = {};
+  body[key] = value;
+  fetch('/api/settings', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(() => {
+    const badge = document.getElementById('settingSaved');
+    badge.classList.add('show');
+    setTimeout(() => badge.classList.remove('show'), 1500);
+  });
+}
+
+// Close settings dropdown when clicking outside
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.settings-wrap')) {
+    document.getElementById('settingsDrop').classList.remove('open');
+  }
+});
+
+// --- Theme ---
+function setTheme(t) {
+  if (t === 'auto') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', t);
+  localStorage.setItem('convo-viewer-theme', t);
+  updateThemeButtons();
+}
+function updateThemeButtons() {
+  const current = document.documentElement.getAttribute('data-theme') || 'auto';
+  document.querySelectorAll('.theme-opt').forEach(b => b.classList.toggle('active', b.dataset.theme === current));
+}
+(function() {
+  const saved = localStorage.getItem('convo-viewer-theme');
+  if (saved && saved !== 'auto') document.documentElement.setAttribute('data-theme', saved);
+  updateThemeButtons();
+})();
+
+// Set search placeholder based on embeddings state
+document.getElementById('search').placeholder = SETTINGS.embeddings_enabled ? 'Search or ask a question...' : 'Search...';
 
 render();
 </script>

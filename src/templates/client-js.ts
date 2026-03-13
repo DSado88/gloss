@@ -21,33 +21,27 @@ function cycleTheme() {
   const html = document.documentElement;
   const current = html.getAttribute('data-theme') || 'auto';
   const next = current === 'auto' ? 'light' : current === 'light' ? 'dark' : 'auto';
-  const btn = document.getElementById('theme-toggle');
   if (next === 'auto') {
     html.removeAttribute('data-theme');
-    btn.textContent = '\\u263E';
-    btn.title = 'Theme: auto (system)';
-  } else if (next === 'light') {
-    html.setAttribute('data-theme', 'light');
-    btn.textContent = '\\u2600';
-    btn.title = 'Theme: light';
   } else {
-    html.setAttribute('data-theme', 'dark');
-    btn.textContent = '\\u263E';
-    btn.title = 'Theme: dark';
+    html.setAttribute('data-theme', next);
   }
   localStorage.setItem('convo-viewer-theme', next);
+  updateThemeLabel();
+}
+function updateThemeLabel() {
+  const label = document.getElementById('theme-label');
+  if (!label) return;
+  const current = document.documentElement.getAttribute('data-theme') || 'auto';
+  label.textContent = 'Theme: ' + current;
 }
 // Restore saved theme
 (function() {
   const saved = localStorage.getItem('convo-viewer-theme');
   if (saved && saved !== 'auto') {
     document.documentElement.setAttribute('data-theme', saved);
-    const btn = document.getElementById('theme-toggle');
-    if (btn) {
-      btn.textContent = saved === 'light' ? '\\u2600' : '\\u263E';
-      btn.title = 'Theme: ' + saved;
-    }
   }
+  updateThemeLabel();
 })();
 
 // ── Close settings dropdown on outside click ──
@@ -918,6 +912,31 @@ function saveCustomTitle() {
   }, 500);
 }
 
+// ── Header collapse on scroll (for Top button visibility) ──
+(function() {
+  const header = document.querySelector('.header');
+  if (!header) return;
+  let headerH = header.offsetHeight;
+  let wasCollapsed = false;
+  let ticking = false;
+
+  function onScroll() {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      const collapsed = window.scrollY > headerH;
+      if (collapsed !== wasCollapsed) {
+        document.body.classList.toggle('header-collapsed', collapsed);
+        wasCollapsed = collapsed;
+      }
+      ticking = false;
+    });
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', () => { headerH = header.offsetHeight; });
+  onScroll();
+})();
+
 // ── WebSocket (server mode live updates) ──
 function connectWebSocket() {
   if (!IS_SERVER || !WS_URL) return;
@@ -927,15 +946,15 @@ function connectWebSocket() {
   const MAX_RECONNECT_DELAY = 10000;
 
   // Insert LIVE badge into the controls bar
-  const controls = document.querySelector('.controls');
-  if (controls) {
+  const controlsRight = document.querySelector('.controls-right');
+  if (controlsRight) {
     const badge = document.createElement('span');
     badge.className = 'live-badge';
     badge.textContent = 'LIVE';
     badge.id = 'live-badge';
     badge.style.cursor = 'pointer';
     badge.onclick = () => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-    controls.appendChild(badge);
+    controlsRight.appendChild(badge);
   }
 
   function isNearBottom() {

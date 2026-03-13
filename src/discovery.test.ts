@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { scanProjectsDir, syncToDb, type DiscoveredSession } from "./discovery.js";
+import { scanProjectsDir, syncToDb, clearDiscoveryCache, type DiscoveredSession } from "./discovery.js";
 import { openDb, type ConvoDb } from "./db.js";
 
 function makeTempDir(): string {
@@ -35,6 +35,7 @@ describe("discovery", () => {
 
   beforeEach(() => {
     tempDir = makeTempDir();
+    clearDiscoveryCache();
   });
 
   afterEach(() => {
@@ -54,7 +55,7 @@ describe("discovery", () => {
         "abc123",
       );
 
-      const sessions = scanProjectsDir(tempDir);
+      const { sessions } = scanProjectsDir(tempDir);
       expect(sessions).toHaveLength(1);
       expect(sessions[0].id).toBe("abc123");
       expect(sessions[0].path).toBe(path.join(projectDir, "abc123.jsonl"));
@@ -66,7 +67,7 @@ describe("discovery", () => {
       writeMinimalJsonl(path.join(project1, "aaa.jsonl"), "aaa");
       writeMinimalJsonl(path.join(project2, "bbb.jsonl"), "bbb");
 
-      const sessions = scanProjectsDir(tempDir);
+      const { sessions } = scanProjectsDir(tempDir);
       expect(sessions).toHaveLength(2);
       const ids = sessions.map((s) => s.id).sort();
       expect(ids).toEqual(["aaa", "bbb"]);
@@ -80,7 +81,7 @@ describe("discovery", () => {
         "sub",
       );
 
-      const sessions = scanProjectsDir(tempDir);
+      const { sessions } = scanProjectsDir(tempDir);
       expect(sessions).toHaveLength(1);
       expect(sessions[0].id).toBe("main");
     });
@@ -111,7 +112,7 @@ describe("discovery", () => {
       const futureTime = Date.now() + 60000;
       fs.utimesSync(newerPath, futureTime / 1000, futureTime / 1000);
 
-      const sessions = scanProjectsDir(tempDir);
+      const { sessions } = scanProjectsDir(tempDir);
       expect(sessions).toHaveLength(1);
       expect(sessions[0].id).toBe("shared-id");
       expect(sessions[0].path).toBe(newerPath);
@@ -148,18 +149,18 @@ describe("discovery", () => {
         lines.join("\n") + "\n",
       );
 
-      const sessions = scanProjectsDir(tempDir);
+      const { sessions } = scanProjectsDir(tempDir);
       expect(sessions).toHaveLength(1);
       expect(sessions[0].model).toBe("claude-opus-4-6");
     });
 
     it("handles empty directory gracefully", () => {
-      const sessions = scanProjectsDir(tempDir);
+      const { sessions } = scanProjectsDir(tempDir);
       expect(sessions).toEqual([]);
     });
 
     it("handles non-existent directory gracefully", () => {
-      const sessions = scanProjectsDir(path.join(tempDir, "no-such-dir"));
+      const { sessions } = scanProjectsDir(path.join(tempDir, "no-such-dir"));
       expect(sessions).toEqual([]);
     });
 
@@ -182,7 +183,7 @@ describe("discovery", () => {
       }
       fs.writeFileSync(filePath, lines.join("\n") + "\n", "utf-8");
 
-      const sessions = scanProjectsDir(tempDir);
+      const { sessions } = scanProjectsDir(tempDir);
       expect(sessions).toHaveLength(1);
       expect(sessions[0].id).toBe("big-session");
     });

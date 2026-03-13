@@ -11,7 +11,11 @@ program
   .command("serve", { isDefault: true })
   .description("Start the conversation viewer server (default)")
   .option("--port <number>", "Port (default: 3456)", parseInt)
+  .option("--no-embeddings", "Disable semantic search embeddings")
   .action(async (options) => {
+    if (options.embeddings === false) {
+      process.env.GLOSS_NO_EMBEDDINGS = "1";
+    }
     const { startServer } = await import("./server.js");
     await startServer({ port: options.port });
   });

@@ -18,6 +18,7 @@ export interface SessionRecord {
   imported_at?: number | null;
   last_modified?: number | null;
   file_size?: number | null;
+  hidden?: number | null;
 }
 
 export interface AnnotationRecord {
@@ -153,6 +154,10 @@ CREATE VIRTUAL TABLE IF NOT EXISTS conversation_fts USING fts5(
   content_rowid='id'
 );
 
+CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project);
+CREATE INDEX IF NOT EXISTS idx_annotations_session ON annotations(session_id);
+CREATE INDEX IF NOT EXISTS idx_annotation_tags_tag_id ON annotation_tags(tag_id);
+
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -200,6 +205,11 @@ export class ConvoDb {
     this.db = db;
   }
 
+  /** Run a function inside a BEGIN/COMMIT transaction. */
+  transaction(fn: () => void): void {
+    this.db.transaction(fn)();
+  }
+
   // ---- Sessions -----------------------------------------------------------
 
   upsertSession(session: SessionRecord): void {
@@ -235,10 +245,13 @@ export class ConvoDb {
     return row ?? null;
   }
 
-  listSessions(opts?: { project?: string; limit?: number; offset?: number }): SessionRecord[] {
+  listSessions(opts?: { project?: string; limit?: number; offset?: number; includeHidden?: boolean }): SessionRecord[] {
     const clauses: string[] = [];
     const params: SQLQueryBindings[] = [];
 
+    if (!opts?.includeHidden) {
+      clauses.push("coalesce(hidden, 0) = 0");
+    }
     if (opts?.project) {
       clauses.push("project = ?");
       params.push(opts.project);
@@ -580,9 +593,8 @@ export class ConvoDb {
       for (let i = 0; i < turns.length; i++) {
         const text = turns[i].text.trim();
         if (!text) continue;
-        insertMap.run(sessionId, i, turns[i].role);
-        const mapId = (this.db.query("SELECT last_insert_rowid() as id").get() as { id: number }).id;
-        insertFts.run(mapId, text);
+        const { lastInsertRowid } = insertMap.run(sessionId, i, turns[i].role);
+        insertFts.run(lastInsertRowid, text);
       }
       insertStatus.run(sessionId, turns.length, fileMtime);
       this.db.exec("COMMIT");
@@ -824,6 +836,7 @@ export function openDb(dbPath?: string): ConvoDb {
   try { db.exec("ALTER TABLE sessions ADD COLUMN last_modified INTEGER"); } catch {}
   try { db.exec("ALTER TABLE sessions ADD COLUMN file_size INTEGER"); } catch {}
   try { db.exec("ALTER TABLE fts_status ADD COLUMN file_mtime INTEGER NOT NULL DEFAULT 0"); } catch {}
+  try { db.exec("ALTER TABLE sessions ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0"); } catch {}
 
   // Migrate FTS to contentless_delete=1 if needed (fixes ghost entry bug)
   try {

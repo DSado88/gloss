@@ -205,6 +205,26 @@ function stopWatcher(state: SessionState) {
 
 const clientJsContent = buildClientJs();
 
+// Index page cache — regenerated at most every 30s
+let indexHtmlCache: string | null = null;
+let indexHtmlCacheTime = 0;
+const INDEX_CACHE_TTL = 30_000;
+
+function getIndexHtml(db: ConvoDb): string {
+  const now = Date.now();
+  if (indexHtmlCache && now - indexHtmlCacheTime < INDEX_CACHE_TTL) {
+    return indexHtmlCache;
+  }
+  const allSessions = db.listSessions({ includeHidden: true });
+  const settings = {
+    embeddings_enabled: db.getSetting("embeddings_enabled") === "1",
+    min_turns: parseInt(db.getSetting("min_turns") ?? "0", 10),
+  };
+  indexHtmlCache = buildServerIndex(allSessions, settings);
+  indexHtmlCacheTime = now;
+  return indexHtmlCache;
+}
+
 // ---------------------------------------------------------------------------
 // Server
 // ---------------------------------------------------------------------------
@@ -215,15 +235,23 @@ export async function startServer(options: { port?: number } = {}): Promise<void
 
   // Discovery: scan and sync
   console.log("Scanning for conversations...");
-  const discovered = scanProjectsDir();
+  const { sessions: discovered } = scanProjectsDir();
   syncToDb(db, discovered);
   console.log(`Found ${discovered.length} conversations`);
 
   // Import legacy sidecar annotations
   importLegacySidecars(db);
 
-  // Initialize embedding engine unless explicitly disabled
-  const embeddingsDisabled = !!process.env.GLOSS_NO_EMBEDDINGS;
+  // Initialize embedding engine: CLI flag overrides, then check DB setting.
+  // If the setting has never been set, default to enabled (backward compat).
+  const embeddingsSetting = db.getSetting("embeddings_enabled");
+  const embeddingsDisabled = process.env.GLOSS_NO_EMBEDDINGS
+    ? true
+    : embeddingsSetting === "0";
+  // Persist the resolved state so the UI reflects reality
+  if (!embeddingsSetting) {
+    db.setSetting("embeddings_enabled", embeddingsDisabled ? "0" : "1");
+  }
   let embeddingEngine: EmbeddingEngine | undefined;
   let vectorIndex: VectorIndex | null = null;
 
@@ -244,12 +272,13 @@ export async function startServer(options: { port?: number } = {}): Promise<void
   /** Kick off embedding backfill if engine is ready. */
   const startEmbeddingBackfill = () => {
     if (!embeddingEngine) return;
+    const minTurns = parseInt(db.getSetting("min_turns") ?? "0", 10);
     if (embeddingEngine.isReady()) {
-      backfillEmbeddings(db, embeddingEngine, vectorIndex);
+      backfillEmbeddings(db, embeddingEngine, vectorIndex, { minTurns });
     } else {
       // Wait for engine to load, then backfill
       embeddingEngine.waitReady().then(() => {
-        backfillEmbeddings(db, embeddingEngine!, vectorIndex);
+        backfillEmbeddings(db, embeddingEngine!, vectorIndex, { minTurns });
       }).catch(() => {
         // Model failed to load — skip embeddings entirely
       });
@@ -262,20 +291,36 @@ export async function startServer(options: { port?: number } = {}): Promise<void
     setTimeout(() => backfillFtsIndex(db, startEmbeddingBackfill), 2000);
   }, 500);
 
-  // Periodic rescan
-  setInterval(() => {
-    try {
-      const freshSessions = scanProjectsDir();
-      syncToDb(db, freshSessions);
-      // Backfill turns, FTS, then embeddings for any new sessions
-      setTimeout(() => {
-        backfillTurnCounts(db);
-        setTimeout(() => backfillFtsIndex(db, startEmbeddingBackfill), 2000);
-      }, 500);
-    } catch {
-      // best-effort
-    }
-  }, 60_000);
+  // Adaptive rescan with backoff — backs off when no changes, resets on activity
+  const MIN_RESCAN_MS = 60_000;
+  const MAX_RESCAN_MS = 5 * 60_000;
+  let rescanInterval = MIN_RESCAN_MS;
+
+  const scheduleRescan = () => {
+    setTimeout(() => {
+      try {
+        const { sessions: freshSessions, changedCount } = scanProjectsDir();
+        syncToDb(db, freshSessions);
+
+        if (changedCount > 0) {
+          rescanInterval = MIN_RESCAN_MS; // Reset on changes
+          indexHtmlCache = null; // Invalidate index page cache
+        } else {
+          rescanInterval = Math.min(rescanInterval * 1.5, MAX_RESCAN_MS);
+        }
+
+        // Always run backfills (incomplete indexes need catching up too)
+        setTimeout(() => {
+          backfillTurnCounts(db);
+          setTimeout(() => backfillFtsIndex(db, startEmbeddingBackfill), 2000);
+        }, 500);
+      } catch {
+        // best-effort
+      }
+      scheduleRescan();
+    }, rescanInterval);
+  };
+  scheduleRescan();
 
   const includeThinking = true;
   const includeTools = true;
@@ -342,11 +387,9 @@ export async function startServer(options: { port?: number } = {}): Promise<void
         });
       }
 
-      // Index page
+      // Index page (cached, rebuilt every 30s)
       if (pathname === "/" || pathname === "/index.html") {
-        const allSessions = db.listSessions({});
-        const html = buildServerIndex(allSessions);
-        return new Response(html, {
+        return new Response(getIndexHtml(db), {
           headers: { "Content-Type": "text/html; charset=utf-8" },
         });
       }
@@ -392,16 +435,43 @@ export async function startServer(options: { port?: number } = {}): Promise<void
   // Cleanup on shutdown
   process.on("SIGINT", () => {
     for (const state of sessions.values()) stopWatcher(state);
+    embeddingEngine?.dispose();
     db.close();
     server.stop();
     process.exit(0);
   });
   process.on("SIGTERM", () => {
     for (const state of sessions.values()) stopWatcher(state);
+    embeddingEngine?.dispose();
     db.close();
     server.stop();
     process.exit(0);
   });
+}
+
+// ---------------------------------------------------------------------------
+// Conversation page cache — avoids re-reading + re-parsing the same JSONL
+// ---------------------------------------------------------------------------
+
+interface ConvoPageCache {
+  html: string;
+  mtimeMs: number;
+  annCount: number;
+}
+
+const pageCache = new Map<string, ConvoPageCache>();
+const PAGE_CACHE_MAX = 30; // max cached pages
+
+function evictOldestPage(): void {
+  if (pageCache.size <= PAGE_CACHE_MAX) return;
+  // Delete the first (oldest inserted) entry
+  const first = pageCache.keys().next().value;
+  if (first) pageCache.delete(first);
+}
+
+/** Invalidate page cache for a session (e.g. after annotation change). */
+export function invalidatePageCache(sessionId: string): void {
+  pageCache.delete(sessionId);
 }
 
 // ---------------------------------------------------------------------------
@@ -421,8 +491,9 @@ function renderConversationPage(
   }
 
   // Guard against OOM on very large files
+  let stat: fs.Stats;
   try {
-    const stat = fs.statSync(session.jsonl_path);
+    stat = fs.statSync(session.jsonl_path);
     if (stat.size > 300 * 1024 * 1024) {
       return new Response(
         `<html><body style="font-family:system-ui;padding:40px;color:#e6edf3;background:#0d1117">` +
@@ -434,6 +505,15 @@ function renderConversationPage(
     }
   } catch {
     return new Response("Could not stat file", { status: 500 });
+  }
+
+  // Check page cache — reuse if file hasn't changed and annotation count matches
+  const annCount = db.getSessionAnnotations(sessionId).length;
+  const cached = pageCache.get(sessionId);
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.annCount === annCount) {
+    return new Response(cached.html, {
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
   }
 
   // Parse the full JSONL
@@ -511,6 +591,11 @@ function renderConversationPage(
   });
 
   const html = buildHtmlPage(params);
+
+  // Cache the rendered page
+  pageCache.set(sessionId, { html, mtimeMs: stat.mtimeMs, annCount });
+  evictOldestPage();
+
   return new Response(html, {
     headers: { "Content-Type": "text/html; charset=utf-8" },
   });
@@ -557,6 +642,7 @@ export async function handleApiRoute(
       db.replaceAnnotationTags(body.id as string, body.tags as string[]);
     }
     // Broadcast to other WS clients on this session
+    invalidatePageCache(sessionId);
     broadcastAnnotationSync(sessionId);
     return new Response(JSON.stringify({ ok: true }), { headers: jsonHeaders });
   }
@@ -584,6 +670,7 @@ export async function handleApiRoute(
     if (Array.isArray(body.tags)) {
       db.replaceAnnotationTags(annId, body.tags as string[]);
     }
+    invalidatePageCache(sessionId);
     broadcastAnnotationSync(sessionId);
     return new Response(JSON.stringify({ ok: true }), { headers: jsonHeaders });
   }
@@ -593,6 +680,7 @@ export async function handleApiRoute(
     const annId = putAnnotationMatch[2];
     const sessionId = putAnnotationMatch[1];
     db.deleteAnnotation(annId);
+    invalidatePageCache(sessionId);
     broadcastAnnotationSync(sessionId);
     return new Response(JSON.stringify({ ok: true }), { headers: jsonHeaders });
   }
@@ -690,6 +778,41 @@ export async function handleApiRoute(
     const body = (await req.json()) as Record<string, unknown>;
     const title = (body.title as string) ?? "";
     db.db.run("UPDATE sessions SET title = ? WHERE id = ?", [title || null, sessionId]);
+    invalidatePageCache(sessionId);
+    indexHtmlCache = null; // title shows on index page too
+    return new Response(JSON.stringify({ ok: true }), { headers: jsonHeaders });
+  }
+
+  // PATCH /api/sessions/:id/hidden
+  const hiddenMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/hidden$/);
+  if (hiddenMatch && req.method === "PATCH") {
+    const sessionId = hiddenMatch[1];
+    const body = (await req.json()) as Record<string, unknown>;
+    const hidden = body.hidden ? 1 : 0;
+    db.db.run("UPDATE sessions SET hidden = ? WHERE id = ?", [hidden, sessionId]);
+    indexHtmlCache = null;
+    return new Response(JSON.stringify({ ok: true }), { headers: jsonHeaders });
+  }
+
+  // GET /api/settings
+  if (pathname === "/api/settings" && req.method === "GET") {
+    const settings = {
+      embeddings_enabled: db.getSetting("embeddings_enabled") === "1",
+      min_turns: parseInt(db.getSetting("min_turns") ?? "0", 10),
+    };
+    return new Response(JSON.stringify(settings), { headers: jsonHeaders });
+  }
+
+  // PATCH /api/settings
+  if (pathname === "/api/settings" && req.method === "PATCH") {
+    const body = (await req.json()) as Record<string, unknown>;
+    if ("embeddings_enabled" in body) {
+      db.setSetting("embeddings_enabled", body.embeddings_enabled ? "1" : "0");
+    }
+    if ("min_turns" in body) {
+      db.setSetting("min_turns", String(Math.max(0, Number(body.min_turns) || 0)));
+    }
+    indexHtmlCache = null;
     return new Response(JSON.stringify({ ok: true }), { headers: jsonHeaders });
   }
 

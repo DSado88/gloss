@@ -113,6 +113,7 @@ export const CSS_STYLES = `
     justify-content: space-between;
   }
 
+
   .header-left { flex: 1; min-width: 0; }
 
   .header h1 {
@@ -149,20 +150,6 @@ export const CSS_STYLES = `
     flex-wrap: wrap;
   }
 
-  #theme-toggle {
-    background: var(--tab-bg);
-    border: none;
-    color: var(--text-muted);
-    padding: 6px 10px;
-    border-radius: 6px;
-    font-size: 16px;
-    cursor: pointer;
-    transition: all 0.1s ease;
-    line-height: 1;
-    flex-shrink: 0;
-    margin-top: 2px;
-  }
-  #theme-toggle:hover { background: var(--tab-hover); color: var(--text); }
 
   .controls {
     background: var(--surface);
@@ -191,6 +178,23 @@ export const CSS_STYLES = `
   .controls input[type="checkbox"] {
     margin-right: 4px;
   }
+
+  .top-btn {
+    background: var(--tab-bg);
+    border: none;
+    color: var(--text-muted);
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    font-family: inherit;
+    transition: all 0.1s ease;
+    display: none;
+  }
+  .top-btn:hover { background: var(--tab-hover); color: var(--text); }
+  body.header-collapsed .top-btn { display: inline-block; }
 
   .toc-toggle {
     background: var(--tab-bg);

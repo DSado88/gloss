@@ -39,7 +39,7 @@ const QUESTION_WORDS = new Set([
 ]);
 
 /** FTS5 special characters that need stripping. */
-const FTS5_SPECIAL = /[":*^~(){}[\]<>+\-!|&\\]/g;
+const FTS5_SPECIAL = /[":*^~(){}[\]<>+\-!|&\\/]/g;
 
 /**
  * Convert a natural-language question into a valid FTS5 query.
@@ -55,21 +55,36 @@ const FILLER_WORDS = new Set([
   "gather", "find", "show", "give", "get", "tell", "look",
 ]);
 
+/** FTS5 boolean operators — must not appear as standalone tokens. */
+const FTS5_OPERATORS = new Set(["or", "and", "not", "near"]);
+
 export function sanitizeFtsQuery(input: string): string {
-  const stripped = input.replace(FTS5_SPECIAL, " ").replace(/[.,;:!?]/g, " ");
+  // Strip all non-alphanumeric except whitespace (nuclear option for safety)
+  const stripped = input.replace(FTS5_SPECIAL, " ").replace(/[^a-zA-Z0-9\s]/g, " ");
   let tokens = stripped
     .toLowerCase()
     .split(/\s+/)
-    .filter((t) => t.length > 1 && !QUESTION_WORDS.has(t) && !FILLER_WORDS.has(t));
+    .filter((t) => t.length > 1 && !QUESTION_WORDS.has(t) && !FILLER_WORDS.has(t) && !FTS5_OPERATORS.has(t));
 
   if (tokens.length === 0) {
-    // Fallback: use any non-trivial words from original (skip question words only)
+    // Fallback: use any non-trivial words from original (skip question words + operators)
     tokens = stripped.toLowerCase().split(/\s+/)
-      .filter((t) => t.length > 1 && !QUESTION_WORDS.has(t));
+      .filter((t) => t.length > 1 && !QUESTION_WORDS.has(t) && !FTS5_OPERATORS.has(t));
     if (tokens.length === 0) {
-      return input.replace(/[^a-zA-Z0-9\s]/g, "").trim();
+      // Ultimate fallback: strip everything non-alphanumeric, then filter operators
+      const last = input.replace(/[^a-zA-Z0-9\s]/g, "").trim().toLowerCase()
+        .split(/\s+/)
+        .filter((t) => t.length > 1 && !FTS5_OPERATORS.has(t));
+      return last.join(" ");
     }
   }
+
+  // Final safety: strip any remaining non-alphanumeric from each token
+  tokens = tokens
+    .map((t) => t.replace(/[^a-z0-9]/g, ""))
+    .filter((t) => t.length > 1 && !FTS5_OPERATORS.has(t));
+
+  if (tokens.length === 0) return "";
 
   // For short queries (1-3 tokens), use implicit AND (all must match)
   // For longer queries, use OR to be more permissive

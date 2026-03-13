@@ -77,11 +77,12 @@ ${cssBlock}
       ${params.metaHtml}
     </div>
   </div>
-  <button id="theme-toggle" onclick="cycleTheme()" title="Toggle dark/light mode">&#9790;</button>
+
 </div>
 <div class="controls">
   <div class="controls-left">
     <button class="toc-toggle" onclick="toggleToc()" title="Table of Contents">&#9776; TOC</button>
+    <button class="top-btn" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Jump to top">&#8593; Top</button>
   </div>
   <div class="controls-right">
     <button id="btn-highlight" onclick="annotate()" disabled title="Select text then press h, or click this button">Highlight</button>
@@ -94,6 +95,8 @@ ${cssBlock}
         <label><input type="checkbox" id="toggle-tools" onchange="document.body.classList.toggle('hide-tools', !this.checked)"> Show tools</label>
         <label><input type="checkbox" id="toggle-thinking" onchange="document.body.classList.toggle('hide-thinking', !this.checked)"> Show thinking</label>
         <label><input type="checkbox" id="toggle-tagging" onchange="document.body.classList.toggle('hide-tagging', !this.checked)"> Tags &amp; kinds</label>
+        <hr style="border:none;border-top:1px solid var(--border);margin:4px 0">
+        <label style="cursor:pointer" onclick="event.preventDefault();cycleTheme()"><span id="theme-label">Theme: auto</span></label>
       </div>
     </div>
   </div>

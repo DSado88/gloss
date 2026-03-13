@@ -2,7 +2,6 @@
 // Constants
 // ---------------------------------------------------------------------------
 
-const MODEL_NAME = "Snowflake/snowflake-arctic-embed-m-v2.0";
 export const EMBEDDING_DIMS = 256;
 
 /** Minimal interface for the db methods VectorIndex needs. */
@@ -16,18 +15,31 @@ export interface EmbeddingDb {
 }
 
 // ---------------------------------------------------------------------------
-// EmbeddingEngine — lazy-loading singleton for ONNX model inference
+// EmbeddingEngine — subprocess-only ONNX model inference
 // ---------------------------------------------------------------------------
 
-/** Singleton embedding engine. Lazy-loads model on first use. */
+/**
+ * Embedding engine that runs the ONNX model exclusively in a subprocess
+ * (embedding-worker.ts) to avoid blocking the main event loop and to
+ * prevent loading the ~4 GB model twice.
+ */
 export class EmbeddingEngine {
-  private extractor: unknown | null = null;
   private readyPromise: Promise<void>;
   private resolveReady!: () => void;
   private rejectReady!: (err: Error) => void;
   private loaded = false;
   private failed = false;
   private disabled = false;
+
+  // Subprocess state
+  private subprocess: ReturnType<typeof Bun.spawn> | null = null;
+  private subprocessReady = false;
+  private nextId = 1;
+  private pending = new Map<
+    number,
+    { resolve: (v: Float32Array[]) => void; reject: (e: Error) => void }
+  >();
+  private stdoutBuffer = "";
 
   constructor() {
     this.readyPromise = new Promise<void>((resolve, reject) => {
@@ -46,40 +58,99 @@ export class EmbeddingEngine {
       return;
     }
 
-    this._init();
+    this._initSubprocess();
   }
 
-  private async _init(): Promise<void> {
+  private _initSubprocess(): void {
     try {
-      // Dynamic import to avoid top-level blocking.
-      // Try native ONNX runtime first, fall back to WASM if N-API fails in Bun.
-      const { pipeline, env } = await import("@huggingface/transformers");
-      try {
-        this.extractor = await pipeline("feature-extraction", MODEL_NAME, {
-          dtype: "q8",
-        });
-      } catch (nativeErr) {
-        console.warn(`[embeddings] Native ONNX failed, trying WASM fallback: ${nativeErr instanceof Error ? nativeErr.message : nativeErr}`);
-        if (env.backends?.onnx?.wasm) {
-          env.backends.onnx.wasm.numThreads = 1;
+      const workerPath = new URL("./embedding-worker.ts", import.meta.url).pathname;
+      this.subprocess = Bun.spawn(["bun", "run", workerPath], {
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "inherit",
+      });
+
+      // Read stdout as text stream
+      const reader = this.subprocess.stdout.getReader();
+      const decoder = new TextDecoder();
+      const readLoop = async () => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            this.stdoutBuffer += decoder.decode(value, { stream: true });
+            const lines = this.stdoutBuffer.split("\n");
+            this.stdoutBuffer = lines.pop() || "";
+            for (const line of lines) {
+              if (line.trim()) this._handleMessage(line);
+            }
+          }
+        } catch {
+          // subprocess exited
         }
-        this.extractor = await pipeline("feature-extraction", MODEL_NAME, {
-          dtype: "q8",
-          device: "wasm",
-        });
-      }
-      this.loaded = true;
-      this.resolveReady();
-      console.log(`[embeddings] Model loaded: ${MODEL_NAME}`);
+      };
+      readLoop();
+
+      // Handle subprocess exit
+      this.subprocess.exited.then((code) => {
+        this.loaded = false;
+        this.subprocessReady = false;
+        if (!this.failed) {
+          this.failed = true;
+          this.rejectReady(new Error(`Embedding subprocess exited with code ${code}`));
+        }
+        // Reject any pending requests
+        for (const [, pending] of this.pending) {
+          pending.reject(new Error("Embedding subprocess exited"));
+        }
+        this.pending.clear();
+        this.subprocess = null;
+      });
     } catch (err) {
       this.failed = true;
       const error = err instanceof Error ? err : new Error(String(err));
-      console.error(`[embeddings] Failed to load model: ${error.message}`);
+      console.error(`[embeddings] Failed to spawn subprocess: ${error.message}`);
       this.rejectReady(error);
     }
   }
 
-  /** Returns true once the model is loaded and ready. */
+  private _handleMessage(line: string): void {
+    let msg: any;
+    try {
+      msg = JSON.parse(line);
+    } catch {
+      return;
+    }
+
+    if (msg.type === "ready") {
+      this.subprocessReady = true;
+      this.loaded = true;
+      this.resolveReady();
+      console.log("[embeddings] Subprocess model loaded");
+      return;
+    }
+
+    if (msg.type === "status") {
+      console.log(`[embeddings] ${msg.message}`);
+      return;
+    }
+
+    // Response to an embed request: { id, embeddings } or { id, error }
+    const pending = this.pending.get(msg.id);
+    if (!pending) return;
+    this.pending.delete(msg.id);
+
+    if (msg.error) {
+      pending.reject(new Error(msg.error));
+    } else if (msg.embeddings) {
+      const results = (msg.embeddings as number[][]).map(
+        (vec) => new Float32Array(vec),
+      );
+      pending.resolve(results);
+    }
+  }
+
+  /** Returns true once the subprocess model is loaded and ready. */
   isReady(): boolean {
     return this.loaded;
   }
@@ -89,40 +160,32 @@ export class EmbeddingEngine {
     return this.failed;
   }
 
-  /** Wait for model to finish loading. */
+  /** Wait for subprocess model to finish loading. */
   async waitReady(): Promise<void> {
     return this.readyPromise;
   }
 
   /**
-   * Embed one or more text strings. Returns array of Float32Array(256).
-   * Handles batching internally. Truncates input to model's max tokens.
+   * Embed texts off the main thread via the subprocess.
+   * Returns array of Float32Array(256).
    */
-  async embed(texts: string[]): Promise<Float32Array[]> {
-    if (!this.loaded || !this.extractor) {
-      throw new Error("Embedding engine not ready");
-    }
-
+  async embedOffThread(texts: string[]): Promise<Float32Array[]> {
     if (texts.length === 0) return [];
-
-    // Truncate each text to ~2000 chars for practical embedding size
-    const truncated = texts.map((t) =>
-      t.length > 2000 ? t.slice(0, 2000) : t,
-    );
-
-    const extractor = this.extractor as (
-      texts: string[],
-      options: { pooling: string; normalize: boolean },
-    ) => Promise<{ tolist(): number[][] }>;
-
-    const output = await extractor(truncated, {
-      pooling: "cls",
-      normalize: true,
-    });
-
-    const fullVectors = output.tolist();
-    // Matryoshka truncation: take first 256 dims, then L2-normalize
-    return fullVectors.map((vec) => truncateAndNormalize(vec));
+    if (this.subprocess && this.subprocessReady) {
+      const id = this.nextId++;
+      const promise = new Promise<Float32Array[]>((resolve, reject) => {
+        this.pending.set(id, { resolve, reject });
+      });
+      try {
+        this.subprocess.stdin.write(JSON.stringify({ id, texts }) + "\n");
+      } catch (err) {
+        this.pending.delete(id);
+        this.subprocessReady = false;
+        throw new Error("Embedding subprocess stdin write failed");
+      }
+      return promise;
+    }
+    throw new Error("Embedding subprocess not available");
   }
 
   /**
@@ -130,14 +193,22 @@ export class EmbeddingEngine {
    * required by snowflake-arctic-embed for asymmetric retrieval.
    */
   async embedQuery(query: string): Promise<Float32Array> {
-    const prefixed = `query: ${query}`;
-    const results = await this.embed([prefixed]);
+    if (!this.loaded) throw new Error("Embedding engine not ready");
+    const results = await this.embedOffThread([`query: ${query}`]);
     return results[0];
   }
 
-  /** Release model resources. */
+  /** Release subprocess resources. */
   dispose(): void {
-    this.extractor = null;
+    if (this.subprocess) {
+      try {
+        this.subprocess.kill();
+      } catch {
+        // already dead
+      }
+      this.subprocess = null;
+    }
+    this.subprocessReady = false;
     this.loaded = false;
   }
 }
