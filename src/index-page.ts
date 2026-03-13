@@ -668,7 +668,6 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
     <input class="search" id="search" type="text" placeholder="Search or ask a question..." autofocus>
     <button class="view-btn" id="askBtn" onclick="askAI()" style="display:none">Ask AI</button>
     <button class="view-btn" id="groupBtn" onclick="toggleGroup()">Group projects</button>
-    <button class="view-btn" id="hiddenBtn" onclick="toggleShowHidden()">Show hidden</button>
     <div class="filter-wrap">
       <button class="view-btn filter-btn" id="filterBtn" onclick="toggleFilter()">Filter projects</button>
       <div class="filter-drop" id="filterDrop"></div>
@@ -691,6 +690,12 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
             <div class="setting-label" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
               Skip sessions under <input class="setting-num" id="minTurnsInput" type="number" min="0" step="1" style="width:48px"> turns
             </div>
+          </div>
+        </div>
+        <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border)">
+          <div class="setting-row">
+            <div class="setting-label">Show hidden sessions</div>
+            <div class="setting-toggle" id="hiddenToggle" onclick="toggleShowHidden()"></div>
           </div>
         </div>
         <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border)">
@@ -1073,7 +1078,8 @@ document.getElementById('filterBtn').classList.toggle('has-muted', mutedProjects
 
 function toggleShowHidden() {
   showHidden = !showHidden;
-  document.getElementById('hiddenBtn').classList.toggle('active', showHidden);
+  var el = document.getElementById('hiddenToggle');
+  if (el) el.classList.toggle('on', showHidden);
   showCount = 80;
   render();
 }
@@ -1147,8 +1153,10 @@ function toggleSettings() {
 
 function initSettings() {
   document.getElementById('minTurnsInput').value = SETTINGS.min_turns || '';
-  const toggle = document.getElementById('embeddingsToggle');
+  var toggle = document.getElementById('embeddingsToggle');
   toggle.classList.toggle('on', SETTINGS.embeddings_enabled);
+  var hiddenToggle = document.getElementById('hiddenToggle');
+  if (hiddenToggle) hiddenToggle.classList.toggle('on', showHidden);
   updateEmbeddingsNote();
   updateEmbeddingsUI();
 }
