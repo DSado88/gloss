@@ -9,7 +9,7 @@ import { CSS_STYLES } from "./templates/css.js";
 import { renderTurn } from "./renderer.js";
 import { escape } from "./markdown.js";
 import { openDb, type ConvoDb } from "./db.js";
-import { scanProjectsDir, syncToDb, backfillTurnCounts, backfillFtsIndex } from "./discovery.js";
+import { scanProjectsDir, syncToDb, backfillTurnCounts, backfillFtsIndex, type ScanResult } from "./discovery.js";
 import { buildServerIndex } from "./index-page.js";
 import type { Turn, TextBlock, TocEntry } from "./types.js";
 import type { ServerWebSocket } from "bun";
@@ -213,7 +213,7 @@ export async function startServer(options: { port?: number } = {}): Promise<void
 
   // Discovery: scan and sync
   console.log("Scanning for conversations...");
-  const discovered = scanProjectsDir();
+  const { sessions: discovered } = scanProjectsDir();
   syncToDb(db, discovered);
   console.log(`Found ${discovered.length} conversations`);
 
@@ -226,20 +226,43 @@ export async function startServer(options: { port?: number } = {}): Promise<void
     setTimeout(() => backfillFtsIndex(db), 2000);
   }, 500);
 
-  // Periodic rescan
-  setInterval(() => {
-    try {
-      const freshSessions = scanProjectsDir();
-      syncToDb(db, freshSessions);
-      // Backfill turns and FTS for any new sessions
-      setTimeout(() => {
-        backfillTurnCounts(db);
-        setTimeout(() => backfillFtsIndex(db), 2000);
-      }, 500);
-    } catch {
-      // best-effort
-    }
-  }, 60_000);
+  // Adaptive periodic rescan: backs off when nothing changes, resets on activity
+  let rescanIntervalMs = 60_000;
+  const RESCAN_MIN_MS = 60_000;   // 1 minute minimum
+  const RESCAN_MAX_MS = 300_000;  // 5 minute maximum
+
+  function scheduleRescan() {
+    setTimeout(() => {
+      try {
+        const { sessions: freshSessions, changedCount } = scanProjectsDir();
+        syncToDb(db, freshSessions);
+
+        if (changedCount === 0) {
+          // Nothing changed — back off
+          rescanIntervalMs = Math.min(rescanIntervalMs * 1.5, RESCAN_MAX_MS);
+          console.log(`[discovery] No changes, next rescan in ${Math.round(rescanIntervalMs / 1000)}s`);
+        } else {
+          // Changes found — reset to fast scan
+          rescanIntervalMs = RESCAN_MIN_MS;
+          console.log(`[discovery] ${changedCount} changed, next rescan in ${Math.round(rescanIntervalMs / 1000)}s`);
+
+          // Only run backfills when changes detected
+          setTimeout(() => {
+            backfillTurnCounts(db);
+            setTimeout(() => {
+              backfillFtsIndex(db);
+            }, 2000);
+          }, 500);
+        }
+      } catch (err) {
+        console.error("[discovery] Rescan error:", err);
+      }
+
+      scheduleRescan(); // Schedule next with current interval
+    }, rescanIntervalMs);
+  }
+
+  scheduleRescan();
 
   const includeThinking = true;
   const includeTools = true;

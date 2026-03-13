@@ -14,6 +14,14 @@ export interface DiscoveredSession {
   fileSize: number;
 }
 
+export interface ScanResult {
+  sessions: DiscoveredSession[];
+  changedCount: number;  // How many files were new or modified
+}
+
+/** Cache of previously discovered sessions, keyed by JSONL path. */
+const discoveryCache = new Map<string, { mtimeMs: number; session: DiscoveredSession }>();
+
 /**
  * Recursively find all *.jsonl files under a directory,
  * excluding subagents/ directories.
@@ -41,19 +49,33 @@ function findJsonlFiles(dir: string): string[] {
 /**
  * Scan ~/.claude/projects/ for JSONL conversation files.
  * Parses the first ~50 lines of each to extract metadata.
+ * Uses an mtime cache to skip redundant 32KB reads for unchanged files.
  */
 export function scanProjectsDir(
   projectsDir?: string,
-): DiscoveredSession[] {
+): ScanResult {
   const dir = projectsDir ?? path.join(os.homedir(), ".claude", "projects");
-  if (!fs.existsSync(dir)) return [];
+  if (!fs.existsSync(dir)) return { sessions: [], changedCount: 0 };
 
   const jsonlFiles = findJsonlFiles(dir);
   const sessions: DiscoveredSession[] = [];
+  const currentPaths = new Set<string>();
+  let changedCount = 0;
 
   for (const filePath of jsonlFiles) {
     try {
       const stat = fs.statSync(filePath);
+      currentPaths.add(filePath);
+
+      // Check mtime cache: skip the expensive 32KB read + parse if unchanged
+      const cached = discoveryCache.get(filePath);
+      if (cached && cached.mtimeMs === stat.mtimeMs) {
+        sessions.push(cached.session);
+        continue;
+      }
+
+      // File is new or modified — do the full read + parse
+      changedCount++;
 
       // Read only the first ~32KB for metadata extraction (avoids loading 200MB+ files)
       const fd = fs.openSync(filePath, "r");
@@ -69,7 +91,7 @@ export function scanProjectsDir(
       const meta = parser.getMetadata();
 
       const sessionId = meta.sessionId ?? path.parse(filePath).name;
-      sessions.push({
+      const session: DiscoveredSession = {
         id: sessionId,
         path: filePath,
         projectDir: meta.projectDir ?? undefined,
@@ -77,11 +99,18 @@ export function scanProjectsDir(
         startTime: meta.startTime ?? undefined,
         lastModified: stat.mtimeMs,
         fileSize: stat.size,
-      });
+      };
+      discoveryCache.set(filePath, { mtimeMs: stat.mtimeMs, session });
+      sessions.push(session);
     } catch {
       // Skip unreadable files
       continue;
     }
+  }
+
+  // Clean up cache entries for deleted files
+  for (const [cachedPath] of discoveryCache) {
+    if (!currentPaths.has(cachedPath)) discoveryCache.delete(cachedPath);
   }
 
   // Deduplicate: same session UUID can appear in multiple project dirs
@@ -94,7 +123,7 @@ export function scanProjectsDir(
     }
   }
 
-  return Array.from(byId.values());
+  return { sessions: Array.from(byId.values()), changedCount };
 }
 
 /**

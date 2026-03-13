@@ -137,6 +137,8 @@ CREATE TABLE IF NOT EXISTS fts_map (
   turn_index INTEGER NOT NULL,
   role TEXT NOT NULL DEFAULT ''
 );
+CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project);
+CREATE INDEX IF NOT EXISTS idx_annotation_tags_tag_id ON annotation_tags(tag_id);
 CREATE INDEX IF NOT EXISTS idx_fts_map_session ON fts_map(session_id);
 
 CREATE TABLE IF NOT EXISTS fts_status (
