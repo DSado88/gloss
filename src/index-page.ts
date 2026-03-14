@@ -844,6 +844,7 @@ function renderRecent(filtered) {
     const ftsBit = s._ftsMatch ? '<span class="s-fts">' + s._ftsMatch + ' matches</span>' : '';
     html += '<span class="s-session"><span class="s-id">' + s.id + '</span>' + titleBit + ftsBit;
     html += '<span class="s-actions">';
+    html += '<button onclick="copyResume(\\'' + s.id + '\\',event)" title="Copy --resume command" class="copy-btn">&#x2398;</button>';
     html += '<button onclick="renameSession(\\'' + s.id + '\\',event)" title="Rename">✎</button>';
     html += '<button onclick="hideSession(\\'' + s.id + '\\',event)" title="' + (s.hidden ? 'Unhide' : 'Hide') + '">' + (s.hidden ? '◉' : '◎') + '</button>';
     html += '</span></span>';
@@ -1107,6 +1108,16 @@ function toggleShowHidden() {
   if (el) el.classList.toggle('on', showHidden);
   showCount = 80;
   render();
+}
+
+function copyResume(id, e) {
+  e.preventDefault();
+  e.stopPropagation();
+  navigator.clipboard.writeText('claude --resume ' + id).then(function() {
+    var btn = e.target.closest('.copy-btn') || e.target;
+    btn.textContent = '\\u2713';
+    setTimeout(function() { btn.innerHTML = '\\u2398'; }, 1200);
+  });
 }
 
 function renameSession(id, e) {
