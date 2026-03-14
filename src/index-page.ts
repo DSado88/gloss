@@ -462,17 +462,6 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
   #askBtn { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
   #askBtn:hover { opacity: 0.9; }
 
-  .turns-filter {
-    display: flex; align-items: center; gap: 5px; height: 34px;
-    padding: 0 8px;
-    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
-    font-size: 0.8rem; color: var(--text2); white-space: nowrap;
-  }
-  .turns-filter input {
-    background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
-    color: var(--text); font-size: 0.8rem; padding: 2px 4px; text-align: center;
-  }
-
   /* Flat list */
   .session-table {
     display: flex; flex-direction: column; gap: 1px;
@@ -679,12 +668,8 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
     <input class="search" id="search" type="text" placeholder="Search or ask a question..." autofocus>
     <button class="view-btn" id="askBtn" onclick="askAI()" style="display:none">Ask AI</button>
     <button class="view-btn" id="groupBtn" onclick="toggleGroup()">Group projects</button>
-    <div class="turns-filter">
-      <label>Min turns</label>
-      <input type="number" id="turnsFilter" min="0" step="1" onchange="setMinTurns(this.value)" style="width:48px">
-    </div>
     <div class="filter-wrap">
-      <button class="view-btn filter-btn" id="filterBtn" onclick="toggleFilter()">Filter projects</button>
+      <button class="view-btn filter-btn" id="filterBtn" onclick="toggleFilter()">Filter</button>
       <div class="filter-drop" id="filterDrop"></div>
     </div>
     <div class="settings-wrap">
@@ -1031,12 +1016,20 @@ function buildFilterDrop() {
   const drop = document.getElementById('filterDrop');
   // Build the static header (actions + search) only once
   if (!drop.querySelector('#filterSearch')) {
-    let header = '<div class="filter-actions" style="border-top:none;border-bottom:1px solid var(--border);margin-top:0;margin-bottom:4px">';
-    header += '<button onclick="showAll()">Select all</button><button onclick="muteAll()">Hide all</button>';
+    let header = '<div class="filter-section" style="padding:8px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;font-size:0.8rem;color:var(--text2)">';
+    header += '<label style="white-space:nowrap">Min turns</label>';
+    header += '<input type="number" id="turnsFilter" min="0" step="1" style="width:48px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:0.8rem;padding:3px 4px;text-align:center">';
+    header += '</div>';
+    header += '<div class="filter-actions" style="border-top:none;border-bottom:1px solid var(--border);margin-top:0;margin-bottom:4px">';
+    header += '<span style="font-size:0.75rem;color:var(--text2);padding-left:2px">Projects</span>';
+    header += '<span><button onclick="showAll()">All</button><button onclick="muteAll()">None</button></span>';
     header += '</div>';
     header += '<input class="filter-search" id="filterSearch" type="text" placeholder="Filter...">';
     header += '<div id="filterList"></div>';
     drop.innerHTML = header;
+    var tf = document.getElementById('turnsFilter');
+    tf.value = minTurnsFilter || '';
+    tf.addEventListener('change', function(e) { setMinTurns(e.target.value); });
     document.getElementById('filterSearch').addEventListener('input', function(e) {
       filterQuery = e.target.value;
       updateFilterList();
@@ -1264,9 +1257,6 @@ function updateThemeButtons() {
 
 // Set search placeholder based on embeddings state
 document.getElementById('search').placeholder = SETTINGS.embeddings_enabled ? 'Search or ask a question...' : 'Search...';
-
-// Init min turns filter from localStorage
-document.getElementById('turnsFilter').value = minTurnsFilter || '';
 
 render();
 </script>
