@@ -462,6 +462,17 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
   #askBtn { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
   #askBtn:hover { opacity: 0.9; }
 
+  .turns-filter {
+    display: flex; align-items: center; gap: 5px; height: 34px;
+    padding: 0 8px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    font-size: 0.8rem; color: var(--text2); white-space: nowrap;
+  }
+  .turns-filter input {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text); font-size: 0.8rem; padding: 2px 4px; text-align: center;
+  }
+
   /* Flat list */
   .session-table {
     display: flex; flex-direction: column; gap: 1px;
@@ -668,6 +679,10 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
     <input class="search" id="search" type="text" placeholder="Search or ask a question..." autofocus>
     <button class="view-btn" id="askBtn" onclick="askAI()" style="display:none">Ask AI</button>
     <button class="view-btn" id="groupBtn" onclick="toggleGroup()">Group projects</button>
+    <div class="turns-filter">
+      <label>Min turns</label>
+      <input type="number" id="turnsFilter" min="0" step="1" onchange="setMinTurns(this.value)" style="width:48px">
+    </div>
     <div class="filter-wrap">
       <button class="view-btn filter-btn" id="filterBtn" onclick="toggleFilter()">Filter projects</button>
       <div class="filter-drop" id="filterDrop"></div>
@@ -724,6 +739,7 @@ let mutedProjects = new Set(JSON.parse(localStorage.getItem('gloss_muted_project
 let sortCol = 'last_modified';
 let sortDir = -1; // -1 = descending, 1 = ascending
 let showHidden = false;
+let minTurnsFilter = parseInt(localStorage.getItem('gloss_min_turns_filter') || '0', 10);
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
@@ -776,10 +792,19 @@ function sortArrow(col) {
   return sortDir === -1 ? ' \\u25BE' : ' \\u25B4';
 }
 
+function isGlossAskSession(s) {
+  return s.model && s.model.includes('haiku') && (s.turn_count || 0) <= 2;
+}
+
 function filter(list) {
   let out = list;
+  // Always hide Gloss's own Ask pipeline sessions (haiku, 2 turns)
+  out = out.filter(s => !isGlossAskSession(s));
   if (!showHidden) {
     out = out.filter(s => !s.hidden);
+  }
+  if (minTurnsFilter > 0) {
+    out = out.filter(s => (s.turn_count || 0) >= minTurnsFilter);
   }
   if (mutedProjects.size) {
     out = out.filter(s => {
@@ -797,6 +822,13 @@ function filter(list) {
     s.id.toLowerCase().includes(q) ||
     (s.title && s.title.toLowerCase().includes(q))
   );
+}
+
+function setMinTurns(val) {
+  minTurnsFilter = parseInt(val, 10) || 0;
+  localStorage.setItem('gloss_min_turns_filter', String(minTurnsFilter));
+  showCount = 80;
+  render();
 }
 
 function toggleGroup() {
@@ -915,7 +947,7 @@ function render() {
     }
   }
 
-  const hiddenCount = ALL.filter(s => s.hidden).length;
+  const hiddenCount = ALL.filter(s => s.hidden && !isGlossAskSession(s)).length;
   const hiddenLabel = !showHidden && hiddenCount ? ' (' + hiddenCount + ' hidden)' : '';
   const label = query
     ? filtered.length + ' of ' + unmuted + (ftsExtra ? ' (' + ftsExtra + ' from content search)' : '') + hiddenLabel
@@ -1232,6 +1264,9 @@ function updateThemeButtons() {
 
 // Set search placeholder based on embeddings state
 document.getElementById('search').placeholder = SETTINGS.embeddings_enabled ? 'Search or ask a question...' : 'Search...';
+
+// Init min turns filter from localStorage
+document.getElementById('turnsFilter').value = minTurnsFilter || '';
 
 render();
 </script>
