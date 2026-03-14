@@ -286,8 +286,9 @@ export async function startServer(options: { port?: number } = {}): Promise<void
   };
 
   // Background: count turns, then FTS, then embeddings
+  const invalidateIndex = () => { indexHtmlCache = null; };
   setTimeout(() => {
-    backfillTurnCounts(db);
+    backfillTurnCounts(db, invalidateIndex);
     setTimeout(() => backfillFtsIndex(db, startEmbeddingBackfill), 2000);
   }, 500);
 
@@ -311,7 +312,7 @@ export async function startServer(options: { port?: number } = {}): Promise<void
 
         // Always run backfills (incomplete indexes need catching up too)
         setTimeout(() => {
-          backfillTurnCounts(db);
+          backfillTurnCounts(db, invalidateIndex);
           setTimeout(() => backfillFtsIndex(db, startEmbeddingBackfill), 2000);
         }, 500);
       } catch {

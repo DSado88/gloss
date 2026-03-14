@@ -228,7 +228,7 @@ function countTurns(filePath: string, fileSize: number): number {
  * Skips sessions where turn_count > 0 and file_size hasn't changed.
  * Processes in batches to avoid blocking the event loop.
  */
-export function backfillTurnCounts(db: ConvoDb): void {
+export function backfillTurnCounts(db: ConvoDb, onUpdated?: () => void): void {
   const sessions = db.listSessions({}) as Array<{
     id: string;
     jsonl_path?: string | null;
@@ -236,9 +236,19 @@ export function backfillTurnCounts(db: ConvoDb): void {
     file_size?: number | null;
   }>;
 
-  const needsCounting = sessions.filter(
-    (s) => s.jsonl_path && (!s.turn_count || s.turn_count === 0),
-  );
+  const needsCounting = sessions.filter((s) => {
+    if (!s.jsonl_path) return false;
+    // Never counted
+    if (!s.turn_count || s.turn_count === 0) return true;
+    // File has grown since last count — recount
+    try {
+      const stat = fs.statSync(s.jsonl_path);
+      if (s.file_size && stat.size > s.file_size) return true;
+    } catch {
+      return false;
+    }
+    return false;
+  });
 
   if (needsCounting.length === 0) return;
 
@@ -256,7 +266,7 @@ export function backfillTurnCounts(db: ConvoDb): void {
         if (!stat.isFile()) continue;
         const turnCount = countTurns(s.jsonl_path, stat.size);
         if (turnCount > 0) {
-          db.db.run("UPDATE sessions SET turn_count = ? WHERE id = ?", [turnCount, s.id]);
+          db.db.run("UPDATE sessions SET turn_count = ?, file_size = ? WHERE id = ?", [turnCount, stat.size, s.id]);
           counted++;
         }
       } catch {
@@ -267,7 +277,10 @@ export function backfillTurnCounts(db: ConvoDb): void {
     if (i < needsCounting.length) {
       setTimeout(batch, 5); // yield to event loop between batches
     } else {
-      console.log(`Turn counts: ${counted} sessions updated`);
+      if (counted > 0) {
+        console.log(`Turn counts: ${counted} sessions updated`);
+        onUpdated?.();
+      }
     }
   };
 
