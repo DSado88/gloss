@@ -1022,7 +1022,7 @@ function buildFilterDrop() {
     header += '</div>';
     header += '<div class="filter-actions" style="border-top:none;border-bottom:1px solid var(--border);margin-top:0;margin-bottom:4px">';
     header += '<span style="font-size:0.75rem;color:var(--text2);padding-left:2px">Projects</span>';
-    header += '<span><button onclick="showAll()">All</button><button onclick="muteAll()">None</button></span>';
+    header += '<span style="display:flex;gap:8px"><button onclick="showAll()">All</button><button onclick="muteAll()">None</button></span>';
     header += '</div>';
     header += '<input class="filter-search" id="filterSearch" type="text" placeholder="Filter...">';
     header += '<div id="filterList"></div>';
