@@ -1,6 +1,8 @@
 __pycache__/
 .squall/
+.swarm/
 .claude/worktrees/
+.DS_Store
 *.jsonl
 *.html
 node_modules/
