@@ -71,6 +71,24 @@ describe("buildIndexPage", () => {
 });
 
 describe("buildServerIndex", () => {
+  it("handles sessions with minimal/null fields without crashing", () => {
+    // Sessions discovered before metadata backfill have mostly null fields
+    const sessions: SessionRecord[] = [
+      { id: "minimal-1" },
+      { id: "minimal-2", jsonl_path: null, project: null, model: null, start_time: null, turn_count: null },
+    ];
+    const html = buildServerIndex(sessions);
+    expect(html).toContain("<!DOCTYPE html>");
+    // The JSON should parse correctly with default fallback values
+    const allMatch = html.match(/const ALL = (.*?);[\r\n]/s);
+    expect(allMatch).not.toBeNull();
+    const parsed = JSON.parse(allMatch![1]);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0].id).toBe("minimal-1");
+    expect(parsed[0].turn_count).toBe(0);
+    expect(parsed[1].project).toBe("");
+  });
+
   it("does not embed raw </ in inline script JSON (prevents XSS via </script>)", () => {
     const sessions: SessionRecord[] = [{
       id: "xss-test",
