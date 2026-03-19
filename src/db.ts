@@ -264,10 +264,10 @@ export class ConvoDb {
     if (opts?.limit) {
       sql += " LIMIT ?";
       params.push(opts.limit);
-    }
-    if (opts?.offset) {
-      sql += " OFFSET ?";
-      params.push(opts.offset);
+      if (opts?.offset) {
+        sql += " OFFSET ?";
+        params.push(opts.offset);
+      }
     }
 
     return this.db.query(sql).all(...params) as SessionRecord[];

@@ -122,6 +122,14 @@ describe("ConvoDb", () => {
       const page = db.listSessions({ limit: 2, offset: 1 });
       expect(page).toHaveLength(2);
     });
+
+    it("listSessions with offset but no limit does not throw", () => {
+      db.upsertSession({ id: "s-a" });
+      db.upsertSession({ id: "s-b" });
+      db.upsertSession({ id: "s-c" });
+      // OFFSET without LIMIT is a SQLite syntax error — should be handled gracefully
+      expect(() => db.listSessions({ offset: 1 })).not.toThrow();
+    });
   });
 
   // -----------------------------------------------------------------------
