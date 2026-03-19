@@ -217,6 +217,14 @@ describe("renderMarkdownInline", () => {
     expect(html).toContain('<a href="https://example.com">https://example.com</a>');
   });
 
+  it("does not include trailing sentence punctuation in auto-linked URLs", () => {
+    const html = renderMarkdownInline("See https://example.com. Also https://test.org, ok?");
+    expect(html).toContain('href="https://example.com"');
+    expect(html).not.toContain('href="https://example.com."');
+    expect(html).toContain('href="https://test.org"');
+    expect(html).not.toContain('href="https://test.org,"');
+  });
+
   // --- Auto-linking file paths ---
 
   it("auto-links /Users/ paths", () => {

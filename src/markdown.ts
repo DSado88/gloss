@@ -124,7 +124,12 @@ function applyAutoLinks(text: string): string {
   // Auto-link bare URLs (not already inside an <a> tag)
   text = text.replace(
     /(?<!href=")(?<!">)(https?:\/\/[^\s<>)]+)/g,
-    '<a href="$1">$1</a>',
+    (_, url: string) => {
+      // Strip trailing sentence punctuation that isn't part of the URL
+      const cleaned = url.replace(/[.,;:!?]+$/, "");
+      const trailing = url.slice(cleaned.length);
+      return `<a href="${cleaned}">${cleaned}</a>${trailing}`;
+    },
   );
   // Auto-link file paths
   text = text.replace(
