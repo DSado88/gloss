@@ -236,6 +236,14 @@ describe("renderMarkdownInline", () => {
     expect(html).toContain('<a href="https://example.com">https://example.com</a>');
   });
 
+  it("does not double-link URLs inside markdown link display text", () => {
+    const html = renderMarkdownInline("[see https://example.com](https://other.com)");
+    // Should produce ONE <a> tag (the markdown link), not nested <a> tags
+    const anchorCount = (html.match(/<a /g) || []).length;
+    expect(anchorCount).toBe(1);
+    expect(html).toContain('href="https://other.com"');
+  });
+
   it("does not include trailing sentence punctuation in auto-linked URLs", () => {
     const html = renderMarkdownInline("See https://example.com. Also https://test.org, ok?");
     expect(html).toContain('href="https://example.com"');

@@ -166,16 +166,23 @@ function applyInlineFormatting(text: string): string {
   p = p.replace(/__(.+?)__/g, "<strong>$1</strong>");
   p = p.replace(/(?<!\w)_([^_]+?)_(?!\w)/g, "<em>$1</em>");
 
-  // Links [text](url) — reject dangerous URI schemes
+  // Links [text](url) — extract into placeholders to prevent auto-link from
+  // double-linking URLs that appear inside the display text of markdown links
+  const linkSpans: string[] = [];
   p = p.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text: string, url: string) => {
     if (/^\s*(javascript|data|vbscript):/i.test(url)) {
       return `${text}`;
     }
-    return `<a href="${url}">${text}</a>`;
+    const idx = linkSpans.length;
+    linkSpans.push(`<a href="${url}">${text}</a>`);
+    return `\x01LK${idx}\x01`;
   });
 
-  // Auto-link URLs and file paths
+  // Auto-link URLs and file paths (safe now — markdown links are placeholders)
   p = applyAutoLinks(p);
+
+  // Restore markdown links
+  p = p.replace(/\x01LK(\d+)\x01/g, (_, idx) => linkSpans[Number(idx)]);
 
   // Headers (# at start of line) — process most specific first
   p = p.replace(/^#### (.+)$/gm, "<h6>$1</h6>");
