@@ -195,6 +195,22 @@ describe("renderToolResult", () => {
     expect(html).toContain("\u2026"); // ellipsis character
   });
 
+  it("counts emoji as single code points, not UTF-16 pairs, in char display", () => {
+    // "😀" is 1 code point but 2 UTF-16 code units (.length = 2)
+    // 2500 emoji = 2500 code points (correct) vs 5000 .length (wrong)
+    const emojiContent = "{" + "😀".repeat(2500);
+    const block: ToolResultBlock = {
+      type: "tool_result",
+      content: emojiContent,
+    };
+    const html = renderToolResult(block);
+    // Should show 2,501 (code points), not 5,001 (.length)
+    expect(html).toContain("2,501 chars");
+    expect(html).not.toContain("5,001");
+    // Preview should use codePointSlice, keeping emoji intact
+    expect(html).toContain("tool-result-preview");
+  });
+
   it("renders agent result (>500 chars, not JSON) as markdown", () => {
     const agentContent = "This is a detailed report about the findings.\n".repeat(20);
     const block: ToolResultBlock = {
