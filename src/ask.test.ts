@@ -1,5 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mergeFtsHits, sanitizeFtsQuery } from "./ask.js";
+import { VectorIndex, truncateAndNormalize, EMBEDDING_DIMS } from "./embeddings.js";
+import { openDb, type ConvoDb } from "./db.js";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as os from "node:os";
 
 // ---------------------------------------------------------------------------
 // Bug #7: FTS totalHits uses max instead of sum
@@ -118,5 +123,103 @@ describe("sanitizeFtsQuery", () => {
     // Should complete quickly and produce a reasonable result
     expect(result.length).toBeGreaterThan(0);
     expect(result).toContain("webpack");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// truncateAndNormalize edge cases
+// ---------------------------------------------------------------------------
+
+describe("truncateAndNormalize", () => {
+  it("handles a zero vector without division by zero", () => {
+    const result = truncateAndNormalize(new Array(EMBEDDING_DIMS).fill(0));
+    expect(result.length).toBe(EMBEDDING_DIMS);
+    expect(result[0]).toBe(0);
+    // L2 norm should be 0 (no crash from dividing by zero)
+    const norm = Math.sqrt(result.reduce((s, v) => s + v * v, 0));
+    expect(norm).toBe(0);
+  });
+
+  it("zero-pads vectors shorter than EMBEDDING_DIMS", () => {
+    const result = truncateAndNormalize([3, 4]); // 3-4-5 triangle → norm = 5
+    expect(result.length).toBe(EMBEDDING_DIMS);
+    expect(result[0]).toBeCloseTo(3 / 5);
+    expect(result[1]).toBeCloseTo(4 / 5);
+    expect(result[2]).toBe(0); // zero-padded
+  });
+
+  it("truncates vectors longer than EMBEDDING_DIMS", () => {
+    const long = new Array(512).fill(0);
+    long[0] = 1;
+    long[300] = 999; // beyond EMBEDDING_DIMS — should be ignored
+    const result = truncateAndNormalize(long);
+    expect(result.length).toBe(EMBEDDING_DIMS);
+    expect(result[0]).toBe(1); // only non-zero in truncated dims → norm = 1
+  });
+});
+
+// ---------------------------------------------------------------------------
+// VectorIndex search
+// ---------------------------------------------------------------------------
+
+describe("VectorIndex", () => {
+  let db: ConvoDb;
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "vec-test-"));
+    db = openDb(path.join(tmpDir, "test.sqlite"));
+  });
+
+  afterEach(() => {
+    db.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function makeVec(mainDim: number, value: number): Float32Array {
+    const vec = new Float32Array(EMBEDDING_DIMS);
+    vec[mainDim] = value;
+    // L2-normalize
+    const norm = Math.sqrt(vec.reduce((s, v) => s + v * v, 0));
+    if (norm > 0) for (let i = 0; i < vec.length; i++) vec[i] /= norm;
+    return vec;
+  }
+
+  it("search returns results ranked by cosine similarity", () => {
+    db.upsertSession({ id: "s1" });
+    db.upsertSession({ id: "s2" });
+    db.storeEmbeddings("s1", [
+      { turnIndex: 0, role: "user", textHash: "a", embedding: makeVec(0, 1) },
+    ], 100);
+    db.storeEmbeddings("s2", [
+      { turnIndex: 0, role: "user", textHash: "b", embedding: makeVec(1, 1) },
+    ], 100);
+
+    const index = VectorIndex.fromDb(db);
+    expect(index.count).toBe(2);
+
+    // Query along dim 0 — should rank s1 higher
+    const query = makeVec(0, 1);
+    const results = index.search(query, 10);
+    expect(results.length).toBe(2);
+    expect(results[0].sessionId).toBe("s1");
+    expect(results[0].score).toBeCloseTo(1.0);
+    expect(results[1].sessionId).toBe("s2");
+    expect(results[1].score).toBeCloseTo(0.0);
+  });
+
+  it("addSession and removeSession update the index correctly", () => {
+    const index = VectorIndex.fromDb(db); // empty
+    expect(index.count).toBe(0);
+
+    index.addSession("s1", [
+      { turnIndex: 0, role: "user", embedding: makeVec(0, 1) },
+      { turnIndex: 1, role: "assistant", embedding: makeVec(1, 1) },
+    ]);
+    expect(index.count).toBe(2);
+
+    index.removeSession("s1");
+    expect(index.count).toBe(0);
+    expect(index.search(makeVec(0, 1), 10)).toEqual([]);
   });
 });
