@@ -2,7 +2,8 @@ import { describe, it, expect, afterEach, vi, beforeEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { convertJsonlToHtml } from "./convert.js";
+import { convertJsonlToHtml, buildPageParams } from "./convert.js";
+import type { Conversation } from "./types.js";
 
 function makeTempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "convo-viewer-test-"));
@@ -127,6 +128,28 @@ describe("convertJsonlToHtml", () => {
     );
 
     mockLog.mockRestore();
+  });
+
+  it("escapes --> in metadata to prevent HTML comment breakage", () => {
+    const convo: Conversation = {
+      sessionId: "test-sess",
+      projectDir: "/home/user/project-->exploit",
+      model: "claude-3",
+      version: "1.0",
+      startTime: "2024-01-15T10:00:00Z",
+      turns: [{ role: "user" as const, timestamp: "2024-01-15T10:00:00Z", blocks: [{ type: "text" as const, text: "Hi" }] }],
+    };
+    const dir = makeTempDir();
+    tempDirs.push(dir);
+    const params = buildPageParams(convo, "/tmp/test.jsonl", dir);
+    // Extract the JSON from the meta comment
+    const jsonStr = params.metaComment.match(/CONVO_META:(\{.*\})/)?.[1];
+    expect(jsonStr).toBeDefined();
+    // The JSON content must not contain --> (breaks HTML comments)
+    expect(jsonStr).not.toContain("-->");
+    // But parsing should recover the original value
+    const parsed = JSON.parse(jsonStr!);
+    expect(parsed.project_dir).toBe("/home/user/project-->exploit");
   });
 
   it("respects includeThinking and includeTools options", () => {

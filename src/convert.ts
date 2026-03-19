@@ -129,7 +129,9 @@ export function buildPageParams(
     turn_count: turnCount,
     user_turns: userTurns,
   });
-  const metaComment = `<!-- CONVO_META:${metaJson} -->`;
+  // Escape > as \u003e in JSON to prevent --> from breaking the HTML comment
+  const safeMetaJson = metaJson.replace(/>/g, "\\u003e");
+  const metaComment = `<!-- CONVO_META:${safeMetaJson} -->`;
 
   // Build lightweight conversation data for JS (text blocks only)
   const convoData = convo.turns.map((turn) => ({
