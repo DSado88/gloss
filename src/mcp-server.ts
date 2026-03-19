@@ -102,7 +102,9 @@ function formatSources(sources: Source[], verbose: boolean): string {
       parts.push("");
     }
   }
-  parts.push("[Use read_conversation with a sessionId + startTurn to see full context]");
+  if (!verbose) {
+    parts.push("[Use read_conversation with a sessionId + startTurn to see full context]");
+  }
   return parts.join("\n");
 }
 
@@ -179,20 +181,20 @@ const server = new McpServer({
 server.tool(
   "search_conversations",
   "Search across all Claude Code conversations using hybrid FTS + vector semantic search. " +
-    "Returns short previews of matching turns by default — use read_conversation to drill into full context. " +
-    "Set verbose=true for full excerpts when you need detailed content from fewer sources.",
+    "Returns full turn excerpts from the top matching conversations. " +
+    "Use read_conversation to expand context around a specific match.",
   {
     query: z.string().describe("Natural language search query"),
-    maxSources: z.number().int().min(1).max(20).optional().describe("Max sources to return (default 10)"),
-    verbose: z.boolean().optional().describe("Return full turn text instead of previews (default false)"),
+    maxSources: z.number().int().min(1).max(20).optional().describe("Max sources to return (default 6)"),
+    brief: z.boolean().optional().describe("Return short previews instead of full excerpts (default false)"),
   },
   async (args) => {
     const data = (await glossPost("/api/search-sources", {
       query: args.query,
-      maxSources: args.maxSources ?? 10,
+      maxSources: args.maxSources ?? 6,
     })) as { sources: Source[]; timing: { ftsMs: number; vectorMs: number } };
 
-    const text = formatSources(data.sources, args.verbose ?? false);
+    const text = formatSources(data.sources, !(args.brief ?? false));
     const timing = `\n\n[Search: FTS ${Math.round(data.timing.ftsMs)}ms, Vector ${Math.round(data.timing.vectorMs)}ms]`;
     return { content: [{ type: "text" as const, text: text + timing }] };
   },
