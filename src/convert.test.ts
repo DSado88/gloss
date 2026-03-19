@@ -167,4 +167,43 @@ describe("convertJsonlToHtml", () => {
     expect(result).toBe(outputFile);
     expect(fs.existsSync(outputFile)).toBe(true);
   });
+
+  it("conversationDataJson includes only text blocks, not tools/thinking", () => {
+    const convo: Conversation = {
+      sessionId: "data-test",
+      projectDir: "/home/user/proj",
+      model: "claude-3",
+      version: "1.0",
+      startTime: "2024-01-15T10:00:00Z",
+      turns: [
+        {
+          role: "user" as const,
+          timestamp: "2024-01-15T10:00:00Z",
+          blocks: [{ type: "text" as const, text: "Hello" }],
+        },
+        {
+          role: "assistant" as const,
+          timestamp: "2024-01-15T10:00:05Z",
+          blocks: [
+            { type: "thinking" as const, text: "Let me think..." },
+            { type: "text" as const, text: "Here is my answer." },
+            { type: "tool_use" as const, name: "Read", input: { file_path: "/f" }, id: "tu-1" },
+            { type: "tool_result" as const, content: "file data", toolUseId: "tu-1" },
+            { type: "text" as const, text: "Based on the file..." },
+          ],
+        },
+      ],
+    };
+    const dir = makeTempDir();
+    tempDirs.push(dir);
+    const params = buildPageParams(convo, "/tmp/test.jsonl", dir);
+
+    // conversationDataJson should only have text blocks
+    const convoData = JSON.parse(params.conversationDataJson);
+    expect(convoData).toHaveLength(2);
+    expect(convoData[0].text).toEqual(["Hello"]);
+    // Assistant turn: only 2 text blocks, not thinking/tool_use/tool_result
+    expect(convoData[1].text).toEqual(["Here is my answer.", "Based on the file..."]);
+    expect(convoData[1].role).toBe("assistant");
+  });
 });
