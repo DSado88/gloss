@@ -743,6 +743,61 @@ describe("ConvoDb", () => {
   });
 
   // -----------------------------------------------------------------------
+  // Settings helpers
+  // -----------------------------------------------------------------------
+
+  describe("getSearchExcludedProjects / setSearchExcludedProjects", () => {
+    it("round-trips project exclusion patterns", () => {
+      db.setSearchExcludedProjects(["path/one", "path/two*"]);
+      const patterns = db.getSearchExcludedProjects();
+      expect(patterns).toEqual(["path/one", "path/two*"]);
+    });
+
+    it("returns empty array when no patterns set", () => {
+      expect(db.getSearchExcludedProjects()).toEqual([]);
+    });
+
+    it("filters empty strings and trims whitespace", () => {
+      db.setSearchExcludedProjects(["  path1  ", "", "path2"]);
+      const patterns = db.getSearchExcludedProjects();
+      expect(patterns).toEqual(["path1", "path2"]);
+    });
+
+    it("clears patterns with empty array", () => {
+      db.setSearchExcludedProjects(["something"]);
+      db.setSearchExcludedProjects([]);
+      expect(db.getSearchExcludedProjects()).toEqual([]);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // getAnnotationForClient
+  // -----------------------------------------------------------------------
+
+  describe("getAnnotationForClient", () => {
+    it("returns annotation with turnId derived from turn_index", () => {
+      db.upsertSession({ id: "cl-sess" });
+      db.upsertAnnotation({
+        id: "cl-ann",
+        session_id: "cl-sess",
+        turn_index: 7,
+        block_index: 0,
+        char_start: 0,
+        char_end: 5,
+        text: "hello",
+      });
+      const result = db.getAnnotationForClient("cl-ann");
+      expect(result).not.toBeNull();
+      expect(result!.turnId).toBe("turn-7");
+      expect(result!.text).toBe("hello");
+    });
+
+    it("returns null for nonexistent annotation", () => {
+      expect(db.getAnnotationForClient("nonexistent")).toBeNull();
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // FTS: empty query edge case
   // -----------------------------------------------------------------------
 
