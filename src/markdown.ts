@@ -209,10 +209,10 @@ function applyInlineFormatting(text: string): string {
 
 /** Convert markdown text to HTML. */
 export function renderMarkdownInline(text: string): string {
-  // Strip null bytes to prevent sentinel injection — the internal sentinel
-  // markers use \x00 delimiters, so user content with null bytes could
-  // bypass HTML escaping if not removed first.
-  text = text.replace(/\x00/g, "");
+  // Strip control characters used as internal sentinel delimiters (\x00 for
+  // fenced code blocks, \x01 for inline code placeholders). User content
+  // with these bytes could bypass escaping or corrupt placeholder restoration.
+  text = text.replace(/[\x00\x01]/g, "");
 
   // Fenced code blocks first (``` lang\n code ```)
   // Use multiline mode so ^``` only matches at the start of a line,

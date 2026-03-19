@@ -169,6 +169,17 @@ describe("renderMarkdownInline", () => {
     expect(html).toContain("<code>foo()</code>");
   });
 
+  it("does not corrupt text containing \\x01 inline-code placeholder pattern", () => {
+    // The inline code placeholder uses \x01IC{N}\x01 internally.
+    // Content with literal \x01 must not be misinterpreted as a placeholder.
+    const malicious = "text \x01IC0\x01 more text";
+    const html = renderMarkdownInline(malicious);
+    expect(html).not.toContain("undefined");
+    // The \x01 chars should be stripped or escaped, preserving the surrounding text
+    expect(html).toContain("text");
+    expect(html).toContain("more text");
+  });
+
   it("does not apply bold/italic inside inline code spans", () => {
     const html = renderMarkdownInline("Use `**not bold**` and `*not italic*` in code");
     // The ** and * inside backticks should be literal, not converted to <strong>/<em>
