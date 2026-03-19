@@ -117,6 +117,18 @@ describe("sanitizeFtsQuery", () => {
     expect(sanitizeFtsQuery("café database")).toBe("caf database");
   });
 
+  it("uses AND for exactly 3 tokens and OR for exactly 4", () => {
+    // 3 tokens → implicit AND (space-separated)
+    const three = sanitizeFtsQuery("webpack babel typescript");
+    expect(three).toBe("webpack babel typescript");
+    expect(three).not.toContain(" OR ");
+
+    // 4 tokens → explicit OR
+    const four = sanitizeFtsQuery("webpack babel typescript eslint");
+    expect(four).toContain(" OR ");
+    expect(four).toBe("webpack OR babel OR typescript OR eslint");
+  });
+
   it("handles extremely long queries without hanging", () => {
     const longQuery = "webpack ".repeat(500);
     const result = sanitizeFtsQuery(longQuery);
