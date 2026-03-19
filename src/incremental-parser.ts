@@ -144,11 +144,13 @@ export class IncrementalParser {
               parsedBlocks.push({ type: "thinking", text: thinking });
             }
           } else if (blockType === "tool_use") {
+            const rawName = block.name;
+            const rawId = block.id;
             parsedBlocks.push({
               type: "tool_use",
-              name: (block.name as string) ?? "unknown",
+              name: typeof rawName === "string" ? rawName : rawName != null ? String(rawName) : "unknown",
               input: (block.input as Record<string, unknown>) ?? {},
-              id: (block.id as string) ?? "",
+              id: typeof rawId === "string" ? rawId : rawId != null ? String(rawId) : "",
             });
           } else if (blockType === "tool_result") {
             hasToolResults = true;

@@ -595,6 +595,31 @@ describe("buildConversation", () => {
     expect(conv.turns[0].blocks[0]).toEqual({ type: "text", text: "Real message" });
   });
 
+  it("coerces non-string tool_use name/id to strings (prevents renderer crash)", () => {
+    const file = createJsonl([
+      {
+        type: "assistant",
+        message: {
+          content: [
+            { type: "tool_use", name: 42, input: { x: 1 }, id: 999 },
+          ],
+        },
+        timestamp: "t1",
+      },
+    ]);
+    const conv = buildConversation(file);
+    expect(conv.turns).toHaveLength(1);
+    const block = conv.turns[0].blocks[0];
+    expect(block.type).toBe("tool_use");
+    if (block.type === "tool_use") {
+      // Must be strings, not numbers — escape() in the renderer would crash on numbers
+      expect(typeof block.name).toBe("string");
+      expect(typeof block.id).toBe("string");
+      expect(block.name).toBe("42");
+      expect(block.id).toBe("999");
+    }
+  });
+
   it("handles thinking blocks with non-string thinking field (e.g. number)", () => {
     const file = createJsonl([
       {
