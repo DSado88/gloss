@@ -107,6 +107,20 @@ describe("buildServerIndex", () => {
   });
 });
 
+describe("buildServerIndex project decoding", () => {
+  it("decodes project from jsonl_path with hyphenated username", () => {
+    const sessions: SessionRecord[] = [{
+      id: "hyph-test",
+      jsonl_path: "/Users/jean-paul/.claude/projects/-Users-jean-paul-Documents-Programs-myapp/session.jsonl",
+    }];
+    const html = buildServerIndex(sessions);
+    const allMatch = html.match(/const ALL = (.*?);[\r\n]/s);
+    const parsed = JSON.parse(allMatch![1]);
+    // Should decode to "myapp", NOT "paul-Documents-Programs-myapp"
+    expect(parsed[0].dirProject).toBe("myapp");
+  });
+});
+
 describe("updateIndex", () => {
   let tmpDir: string;
 

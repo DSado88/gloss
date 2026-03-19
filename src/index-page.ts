@@ -312,9 +312,9 @@ function decodeProjectDir(encoded: string): string {
   }
 
   const knownPrefixes = [
-    /^Users-([^-]+)-Documents-Programs-/,
-    /^Users-([^-]+)-Documents-/,
-    /^Users-([^-]+)-/,
+    /^Users-(.+?)-Documents-Programs-/,
+    /^Users-(.+?)-Documents-/,
+    /^Users-([^-]+)-/,  // last resort: no anchor keyword, so [^-]+ is safest
   ];
   for (const re of knownPrefixes) {
     const m = stripped.match(re);
