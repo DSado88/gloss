@@ -71,26 +71,38 @@ interface Source {
   turns: SourceTurn[];
 }
 
-function formatSources(sources: Source[]): string {
+function formatSources(sources: Source[], verbose: boolean): string {
   if (sources.length === 0) return "No matching conversations found.";
 
   const parts: string[] = [];
   for (const src of sources) {
     const label = src.title || src.project || src.sessionId;
-    parts.push(`── Source ${src.num}: ${label} (${src.project}) ──`);
-    parts.push(`   Session: ${src.sessionId}`);
-    parts.push(`   Match turn: ${src.matchTurnIndex}`);
-    parts.push("");
-    for (const t of src.turns) {
-      const role = t.role === "user" ? "Human" : "Assistant";
-      const text = t.text.length > 3000
-        ? t.text.slice(0, 3000) + "\n... [truncated]"
-        : t.text;
-      parts.push(`   [Turn ${t.index}] ${role}:`);
-      parts.push(`   ${text.split("\n").join("\n   ")}`);
+    const proj = src.project.split("/").pop() || src.project;
+    parts.push(`── Source ${src.num}: ${label} [${proj}] ──`);
+    parts.push(`   Session: ${src.sessionId} | Turn: ${src.matchTurnIndex}`);
+
+    if (verbose) {
+      // Full turn text — for deep searches with few sources
+      for (const t of src.turns) {
+        const role = t.role === "user" ? "Human" : "Assistant";
+        const text = t.text.length > 3000
+          ? t.text.slice(0, 3000) + "\n... [truncated]"
+          : t.text;
+        parts.push(`   [Turn ${t.index}] ${role}:`);
+        parts.push(`   ${text.split("\n").join("\n   ")}`);
+        parts.push("");
+      }
+    } else {
+      // Preview mode — short excerpts, let Claude drill in with read_conversation
+      for (const t of src.turns) {
+        const role = t.role === "user" ? "Human" : "Assistant";
+        const preview = t.text.slice(0, 200).replace(/\n/g, " ").trim();
+        parts.push(`   [Turn ${t.index}] ${role}: ${preview}${t.text.length > 200 ? "..." : ""}`);
+      }
       parts.push("");
     }
   }
+  parts.push("[Use read_conversation with a sessionId + startTurn to see full context]");
   return parts.join("\n");
 }
 
@@ -167,11 +179,12 @@ const server = new McpServer({
 server.tool(
   "search_conversations",
   "Search across all Claude Code conversations using hybrid FTS + vector semantic search. " +
-    "Returns relevant conversation excerpts with surrounding context. " +
-    "Use this to find past discussions, decisions, code patterns, or anything discussed in previous sessions.",
+    "Returns short previews of matching turns by default — use read_conversation to drill into full context. " +
+    "Set verbose=true for full excerpts when you need detailed content from fewer sources.",
   {
     query: z.string().describe("Natural language search query"),
     maxSources: z.number().int().min(1).max(20).optional().describe("Max sources to return (default 10)"),
+    verbose: z.boolean().optional().describe("Return full turn text instead of previews (default false)"),
   },
   async (args) => {
     const data = (await glossPost("/api/search-sources", {
@@ -179,7 +192,7 @@ server.tool(
       maxSources: args.maxSources ?? 10,
     })) as { sources: Source[]; timing: { ftsMs: number; vectorMs: number } };
 
-    const text = formatSources(data.sources);
+    const text = formatSources(data.sources, args.verbose ?? false);
     const timing = `\n\n[Search: FTS ${Math.round(data.timing.ftsMs)}ms, Vector ${Math.round(data.timing.vectorMs)}ms]`;
     return { content: [{ type: "text" as const, text: text + timing }] };
   },
