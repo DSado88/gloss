@@ -108,6 +108,38 @@ describe("buildServerIndex", () => {
 });
 
 describe("buildServerIndex project decoding", () => {
+  it("falls back to dirProject when shortProject looks like a hash or KSUID", () => {
+    const sessions: SessionRecord[] = [
+      {
+        id: "hash-test",
+        // project ends in a 16-char hex hash → cleared by heuristic
+        project: "/home/user/abcdef0123456789",
+        jsonl_path: "/Users/test/.claude/projects/-Users-test-Documents-real-project/s.jsonl",
+      },
+      {
+        id: "ksuid-test",
+        // project ends in KSUID-like component → cleared
+        project: "/home/user/01ABCDEFGHIJKLMNOP",
+        jsonl_path: "/Users/test/.claude/projects/-Users-test-Documents-ksuid-proj/s.jsonl",
+      },
+      {
+        id: "timestamp-test",
+        // project ends in 10+ digit timestamp → cleared
+        project: "/home/user/1710000000000",
+      },
+    ];
+    const html = buildServerIndex(sessions);
+    const allMatch = html.match(/const ALL = (.*?);[\r\n]/s);
+    const parsed = JSON.parse(allMatch![1]);
+
+    // Hash project → falls back to dirProject decoded from jsonl_path
+    expect(parsed[0].project).toBe("real-project");
+    // KSUID project → falls back to dirProject
+    expect(parsed[1].project).toBe("ksuid-proj");
+    // Timestamp project with no jsonl_path → empty fallback
+    expect(parsed[2].project).toBe("");
+  });
+
   it("decodes project from jsonl_path with hyphenated username", () => {
     const sessions: SessionRecord[] = [{
       id: "hyph-test",
