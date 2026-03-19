@@ -129,6 +129,19 @@ describe("sanitizeFtsQuery", () => {
     expect(four).toBe("webpack OR babel OR typescript OR eslint");
   });
 
+  it("OR separators in output are not leaked as search tokens", () => {
+    // sanitizeFtsQuery with 4+ tokens produces "word OR word OR ..."
+    // When downstream code extracts individual tokens by splitting on whitespace,
+    // the "OR" separators must be filtered out (case-insensitive)
+    const ftsQuery = sanitizeFtsQuery("webpack production configuration optimization");
+    expect(ftsQuery).toContain(" OR ");
+
+    // Simulate the token extraction from searchForSources (line 299)
+    const tokens = ftsQuery.toLowerCase().split(/\s+/).filter((t) => t !== "or" && t.length > 1);
+    expect(tokens).not.toContain("or");
+    expect(tokens).toEqual(["webpack", "production", "configuration", "optimization"]);
+  });
+
   it("handles extremely long queries without hanging", () => {
     const longQuery = "webpack ".repeat(500);
     const result = sanitizeFtsQuery(longQuery);

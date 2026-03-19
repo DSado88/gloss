@@ -296,7 +296,7 @@ async function searchForSources(
     console.error(`[ask] FTS error for query "${ftsQuery}": ${msg}`);
   }
 
-  const ftsTokens = ftsQuery.toLowerCase().split(/\s+/).filter((t) => t !== "OR" && t.length > 1);
+  const ftsTokens = ftsQuery.toLowerCase().split(/\s+/).filter((t) => t !== "or" && t.length > 1);
 
   // Individual FTS queries per token — ensures each concept gets proper
   // representation instead of being drowned by generic words in the OR query
