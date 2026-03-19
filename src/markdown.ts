@@ -191,8 +191,10 @@ function applyInlineFormatting(text: string): string {
 /** Convert markdown text to HTML. */
 export function renderMarkdownInline(text: string): string {
   // Fenced code blocks first (``` lang\n code ```)
+  // Use multiline mode so ^``` only matches at the start of a line,
+  // preventing mid-line backticks (e.g. in template literals) from closing the block.
   text = text.replace(
-    /```(\w*)\n(.*?)```/gs,
+    /```(\w*)\n(.*?)^```\s*$/gms,
     (_m, lang: string, code: string) => {
       const escapedLang = escape(lang);
       const escapedCode = escape(code.trim());

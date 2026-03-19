@@ -140,6 +140,13 @@ describe("renderMarkdownInline", () => {
     expect(html).toContain("hello");
   });
 
+  it("does not close code block on triple backticks mid-line", () => {
+    const md = '```js\nconst fence = "```";\n```';
+    const html = renderMarkdownInline(md);
+    // The full code line should be inside the code block, not cut off at the mid-line ```
+    expect(html).toContain('const fence = &quot;```&quot;;');
+  });
+
   it("does NOT process markdown inside code blocks", () => {
     const md = "```\n**bold** and *italic*\n```";
     const html = renderMarkdownInline(md);
