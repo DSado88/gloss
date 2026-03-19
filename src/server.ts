@@ -650,6 +650,11 @@ async function handleApiRouteInner(
   if (getAnnotationsMatch && req.method === "POST") {
     const sessionId = getAnnotationsMatch[1];
     const body = (await req.json()) as Record<string, unknown>;
+    if (!body.id || typeof body.id !== "string") {
+      return new Response(JSON.stringify({ error: "Missing required field: id" }), {
+        status: 400, headers: jsonHeaders,
+      });
+    }
     db.upsertAnnotation({
       id: body.id as string,
       session_id: sessionId,

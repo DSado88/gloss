@@ -366,6 +366,23 @@ describe("server routes", () => {
   // Malformed request handling
   // -----------------------------------------------------------------------
 
+  it("POST annotation without required id field returns 400", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions/${SESSION_ID}/annotations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        turnIndex: 0,
+        charStart: 0,
+        charEnd: 5,
+        text: "hello",
+        // deliberately omitting id
+      }),
+    });
+    expect(res.status).toBe(400);
+    const data = await res.json() as any;
+    expect(data.error).toBeDefined();
+  });
+
   it("POST annotation with malformed JSON returns 400, not 500", async () => {
     const res = await fetch(`${baseUrl}/api/sessions/${SESSION_ID}/annotations`, {
       method: "POST",
