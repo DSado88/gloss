@@ -564,6 +564,20 @@ describe("server routes", () => {
   // API 404s
   // -----------------------------------------------------------------------
 
+  it("GET /api/sessions/:id/annotations returns empty array for nonexistent session", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions/nonexistent-xyz/annotations`);
+    expect(res.status).toBe(200);
+    const data = await res.json() as any[];
+    expect(data).toEqual([]);
+  });
+
+  it("DELETE to annotation collection endpoint (no annId) returns 404", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions/${SESSION_ID}/annotations`, {
+      method: "DELETE",
+    });
+    expect(res.status).toBe(404);
+  });
+
   it("unknown API routes return 404", async () => {
     const res = await fetch(`${baseUrl}/api/unknown`);
     expect(res.status).toBe(404);
