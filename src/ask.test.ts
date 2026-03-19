@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergeFtsHits } from "./ask.js";
+import { mergeFtsHits, sanitizeFtsQuery } from "./ask.js";
 
 // ---------------------------------------------------------------------------
 // Bug #7: FTS totalHits uses max instead of sum
@@ -39,7 +39,7 @@ describe("mergeFtsHits", () => {
     expect(result.size).toBe(0);
   });
 
-  it("handles three-way merge for the same session", () => {
+  it("three-way merge for the same session", () => {
     // Simulates: base FTS query + 2 Claude-extracted term queries all match the same session
     const hits = [
       { session_id: "s1", match_count: 2, best_rank: -4.0 },
@@ -51,5 +51,58 @@ describe("mergeFtsHits", () => {
     const s1 = result.get("s1")!;
     expect(s1.totalHits).toBe(6); // 2 + 1 + 3
     expect(s1.bestRank).toBe(-6.0); // min of all three
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sanitizeFtsQuery edge cases
+// ---------------------------------------------------------------------------
+
+describe("sanitizeFtsQuery", () => {
+  it("strips FTS5 operators (AND/OR/NOT/NEAR)", () => {
+    // "find" is a filler, "or"/"and"/"not" are operators → only "search" remains
+    expect(sanitizeFtsQuery("find OR search AND NOT")).toBe("search");
+  });
+
+  it("returns empty for queries with only special characters", () => {
+    expect(sanitizeFtsQuery('"()*+[]{}|')).toBe("");
+  });
+
+  it("preserves meaningful content words", () => {
+    const result = sanitizeFtsQuery("webpack production configuration");
+    expect(result).toContain("webpack");
+    expect(result).toContain("production");
+    expect(result).toContain("configuration");
+  });
+
+  it("uses OR for longer queries (4+ tokens)", () => {
+    const result = sanitizeFtsQuery("webpack production configuration optimization deployment");
+    expect(result).toContain(" OR ");
+  });
+
+  it("uses implicit AND for short queries (1-3 tokens)", () => {
+    const result = sanitizeFtsQuery("webpack configuration");
+    expect(result).not.toContain(" OR ");
+    expect(result).toBe("webpack configuration");
+  });
+
+  it("handles empty input", () => {
+    expect(sanitizeFtsQuery("")).toBe("");
+  });
+
+  it("strips question words and filler words", () => {
+    const result = sanitizeFtsQuery("what is the relevant important database setup");
+    // "what", "is", "the" are question words; "relevant", "important" are filler
+    expect(result).toContain("database");
+    expect(result).toContain("setup");
+    expect(result).not.toContain("what");
+    expect(result).not.toContain("relevant");
+  });
+
+  it("falls back gracefully when all words are stop words", () => {
+    // "just about everything" — all filler words, but fallback keeps them
+    const result = sanitizeFtsQuery("just about everything");
+    // Fallback relaxes filler filtering — should return something
+    expect(result.length).toBeGreaterThan(0);
   });
 });
