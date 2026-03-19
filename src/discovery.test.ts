@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { scanProjectsDir, syncToDb, clearDiscoveryCache, type DiscoveredSession } from "./discovery.js";
+import { scanProjectsDir, syncToDb, clearDiscoveryCache, backfillTurnCounts, type DiscoveredSession } from "./discovery.js";
 import { openDb, type ConvoDb } from "./db.js";
 
 function makeTempDir(): string {
@@ -271,6 +271,40 @@ describe("discovery", () => {
       expect(record!.jsonl_path).toBe("/tmp/test/sess-1.jsonl");
       expect(record!.project).toBe("/home/user/proj");
       expect(record!.model).toBe("claude-opus-4-6");
+    });
+
+    it("recounts turns when file shrinks (truncated/replaced)", () => {
+      // Write a file with 4 user+assistant pairs
+      const projectDir = path.join(tempDir, "proj");
+      const filePath = path.join(projectDir, "shrink.jsonl");
+      fs.mkdirSync(projectDir, { recursive: true });
+      const lines: string[] = [];
+      for (let i = 0; i < 4; i++) {
+        lines.push(JSON.stringify({ type: "user", message: { content: `Q${i}` }, timestamp: `t${i * 2}` }));
+        lines.push(JSON.stringify({ type: "assistant", message: { content: `A${i}` }, timestamp: `t${i * 2 + 1}` }));
+      }
+      fs.writeFileSync(filePath, lines.join("\n") + "\n", "utf-8");
+      const bigSize = fs.statSync(filePath).size;
+
+      // Seed DB as if we already counted this file
+      db.upsertSession({
+        id: "shrink-test",
+        jsonl_path: filePath,
+        turn_count: 8,
+        file_size: bigSize,
+      });
+
+      // Truncate to 1 exchange
+      const smallLines = [
+        JSON.stringify({ type: "user", message: { content: "Only" }, timestamp: "t0" }),
+        JSON.stringify({ type: "assistant", message: { content: "One" }, timestamp: "t1" }),
+      ];
+      fs.writeFileSync(filePath, smallLines.join("\n") + "\n", "utf-8");
+
+      backfillTurnCounts(db);
+
+      const session = db.getSession("shrink-test");
+      expect(session!.turn_count).toBe(2);
     });
 
     it("updates path when re-syncing same session with new path", () => {

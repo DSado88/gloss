@@ -240,10 +240,10 @@ export function backfillTurnCounts(db: ConvoDb, onUpdated?: () => void): void {
     if (!s.jsonl_path) return false;
     // Never counted
     if (!s.turn_count || s.turn_count === 0) return true;
-    // File has grown since last count — recount
+    // File size changed since last count — recount
     try {
       const stat = fs.statSync(s.jsonl_path);
-      if (s.file_size && stat.size > s.file_size) return true;
+      if (s.file_size && stat.size !== s.file_size) return true;
     } catch {
       return false;
     }
