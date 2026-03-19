@@ -84,10 +84,14 @@ export function scanProjectsDir(
 
       // Read only the first ~32KB for metadata extraction (avoids loading 200MB+ files)
       const fd = fs.openSync(filePath, "r");
-      const buf = Buffer.alloc(Math.min(32768, stat.size));
-      fs.readSync(fd, buf, 0, buf.length, 0);
-      fs.closeSync(fd);
-      const snippet = buf.toString("utf-8");
+      let snippet: string;
+      try {
+        const buf = Buffer.alloc(Math.min(32768, stat.size));
+        fs.readSync(fd, buf, 0, buf.length, 0);
+        snippet = buf.toString("utf-8");
+      } finally {
+        fs.closeSync(fd);
+      }
       // Take first ~50 lines from the snippet
       const lines = snippet.split("\n").slice(0, 50);
 

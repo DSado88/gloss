@@ -208,6 +208,17 @@ describe("discovery", () => {
       expect(sessions[0].model).toBeUndefined();
     });
 
+    it("handles zero-byte JSONL files without crashing or leaking fds", () => {
+      const projectDir = path.join(tempDir, "proj");
+      fs.mkdirSync(projectDir, { recursive: true });
+      fs.writeFileSync(path.join(projectDir, "empty-session.jsonl"), "");
+
+      const { sessions } = scanProjectsDir(tempDir);
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].id).toBe("empty-session"); // filename fallback
+      expect(sessions[0].fileSize).toBe(0);
+    });
+
     it("does not read entire large files", () => {
       const projectDir = path.join(tempDir, "-Users-test-project1");
       fs.mkdirSync(projectDir, { recursive: true });
