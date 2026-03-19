@@ -142,6 +142,27 @@ When working in the Gloss repo, these skills are available:
 | `/gloss:search` | Search highlights across all sessions |
 | `/gloss:auto-tag` | AI-powered auto-tagging of highlights |
 
+## MCP Server (Claude Code integration)
+
+Gloss exposes a Model Context Protocol server so Claude Code can search and read past conversations directly during a session.
+
+```bash
+claude mcp add --transport stdio --scope user gloss -- bun /path/to/gloss/src/mcp-server.ts
+```
+
+Requires the Gloss server running on `:3456`. The MCP server talks to it over HTTP — no duplicate embedding engine.
+
+**Tools:**
+
+| Tool | What it does |
+|------|-------------|
+| `search_conversations` | Hybrid FTS + vector search across all sessions. Returns sources with relevance scores, matched tokens, and turn ranges. |
+| `read_conversation` | Read turns from a session by ID + range (server-side slicing, max 30 turns/call). |
+| `get_highlights` | Query annotations by session, tag, text search, or recency. Filters compose. |
+| `list_sessions` | Browse sessions by project or recency. |
+
+Search results include RRF relevance scores per source so Claude can weight strong matches over weak ones, plus `startTurnIndex`/`endTurnIndex` for precise follow-up reads. Text truncation is semantic-aware — won't break mid-code-block.
+
 ## Architecture
 
 ```
@@ -167,6 +188,7 @@ Key modules:
 | `src/cli.ts` | CLI entry point (serve, export, highlights, search-exclude) |
 | `src/ask.ts` | Hybrid search pipeline: FTS + vector + RRF fusion + Haiku synthesis |
 | `src/ask-page.ts` | Streaming Ask UI with answer + source cards |
+| `src/mcp-server.ts` | MCP stdio server — bridges Claude Code to the Gloss HTTP API |
 | `src/embeddings.ts` | Embedding engine (subprocess) + in-memory vector index |
 | `src/indexer.ts` | Background embedding backfill with batching and progress logging |
 | `src/index-page.ts` | Server index page with search/filter/grouping |
