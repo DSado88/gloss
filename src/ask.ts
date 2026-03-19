@@ -260,7 +260,7 @@ interface SearchPhaseResult {
   timing: { ftsMs: number; vectorMs: number };
 }
 
-async function searchForSources(
+export async function searchForSources(
   db: ConvoDb,
   query: string,
   options?: AskSearchOptions,

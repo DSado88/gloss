@@ -758,6 +758,39 @@ async function handleApiRouteInner(
     return new Response(JSON.stringify(convoData), { headers: jsonHeaders });
   }
 
+  // POST /api/search-sources — retrieval only (no LLM synthesis)
+  if (pathname === "/api/search-sources" && req.method === "POST") {
+    const body = (await req.json()) as Record<string, unknown>;
+    const q = (body.query as string)?.trim();
+    if (!q) {
+      return new Response(JSON.stringify({ error: "No query" }), { status: 400, headers: jsonHeaders });
+    }
+    const { searchForSources } = await import("./ask.js");
+    const result = await searchForSources(db, q, {
+      maxSources: (body.maxSources as number) ?? undefined,
+      vectorIndex: search?.vectorIndex ?? undefined,
+      embeddingEngine: search?.embeddingEngine,
+    });
+    // Convert Turn objects to plain text for API consumers
+    const sources = result.sources.map((s, i) => ({
+      num: i + 1,
+      sessionId: s.sessionId,
+      project: s.project,
+      title: s.title,
+      matchTurnIndex: s.matchTurnIndex,
+      startTurnIndex: s.startTurnIndex,
+      turns: s.turns.map((t, ti) => ({
+        role: t.role,
+        index: s.startTurnIndex + ti,
+        text: t.blocks
+          .filter((b): b is TextBlock => b.type === "text")
+          .map((b) => b.text || "")
+          .join("\n"),
+      })),
+    }));
+    return new Response(JSON.stringify({ query: q, sources, timing: result.timing }), { headers: jsonHeaders });
+  }
+
   // POST /api/ask — JSON response
   if (pathname === "/api/ask" && req.method === "POST") {
     const body = (await req.json()) as Record<string, unknown>;
@@ -903,6 +936,54 @@ async function handleApiRouteInner(
     }
     indexHtmlCache = null;
     return new Response(JSON.stringify({ ok: true }), { headers: jsonHeaders });
+  }
+
+  // GET /api/sessions?project=...&limit=...
+  if (pathname === "/api/sessions" && req.method === "GET") {
+    const url = new URL(req.url);
+    const project = url.searchParams.get("project") ?? undefined;
+    const limit = parseInt(url.searchParams.get("limit") ?? "20", 10);
+    let sessions = db.listSessions({ limit: Math.min(limit, 200) });
+    if (project) {
+      const q = project.toLowerCase();
+      sessions = sessions.filter((s) =>
+        (s.project ?? "").toLowerCase().includes(q),
+      );
+    }
+    const out = sessions.map((s) => ({
+      id: s.id,
+      project: s.project ?? "",
+      title: s.title ?? "",
+      model: s.model ?? "",
+      turn_count: s.turn_count ?? 0,
+      last_modified: s.last_modified ?? s.start_time ?? 0,
+      file_size: s.file_size ?? 0,
+    }));
+    return new Response(JSON.stringify(out), { headers: jsonHeaders });
+  }
+
+  // GET /api/highlights?q=...&session=...&tag=...&days=...&limit=...
+  if (pathname === "/api/highlights" && req.method === "GET") {
+    const url = new URL(req.url);
+    const q = url.searchParams.get("q") ?? "";
+    const sessionId = url.searchParams.get("session") ?? undefined;
+    const tag = url.searchParams.get("tag") ?? undefined;
+    const days = parseInt(url.searchParams.get("days") ?? "0", 10);
+    const limit = Math.min(parseInt(url.searchParams.get("limit") ?? "30", 10), 200);
+
+    let results;
+    if (tag) {
+      results = db.getAnnotationsByTag(tag, { limit });
+    } else if (q) {
+      results = db.searchAnnotations(q, { sessionId, limit });
+    } else if (days > 0) {
+      results = db.getRecentAnnotations({ days, limit });
+    } else if (sessionId) {
+      results = db.getSessionAnnotations(sessionId);
+    } else {
+      results = db.getRecentAnnotations({ days: 30, limit });
+    }
+    return new Response(JSON.stringify(results), { headers: jsonHeaders });
   }
 
   return new Response("Not Found", { status: 404 });
