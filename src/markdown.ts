@@ -151,8 +151,14 @@ function applyTableInlineFormatting(piece: string): string {
 }
 
 function applyInlineFormatting(text: string): string {
-  // Inline code
-  let p = text.replace(/`([^`]+)`/g, "<code>$1</code>");
+  // Extract inline code spans into placeholders so their content
+  // is not processed by bold/italic/link regexes
+  const codeSpans: string[] = [];
+  let p = text.replace(/`([^`]+)`/g, (_, code: string) => {
+    const idx = codeSpans.length;
+    codeSpans.push(`<code>${code}</code>`);
+    return `\x01IC${idx}\x01`;
+  });
 
   // Bold and italic (* variants)
   p = applyBoldItalic(p);
@@ -190,6 +196,9 @@ function applyInlineFormatting(text: string): string {
   // Paragraphs (double newline) and line breaks (single newline)
   p = p.replace(/\n\n+/g, "</p><p>");
   p = p.replace(/\n(?!<\/?\s*(?:ul|li|h[3-6]|hr|p|table|div))/g, "<br>\n");
+
+  // Restore inline code spans
+  p = p.replace(/\x01IC(\d+)\x01/g, (_, idx) => codeSpans[Number(idx)]);
 
   return p;
 }

@@ -169,6 +169,14 @@ describe("renderMarkdownInline", () => {
     expect(html).toContain("<code>foo()</code>");
   });
 
+  it("does not apply bold/italic inside inline code spans", () => {
+    const html = renderMarkdownInline("Use `**not bold**` and `*not italic*` in code");
+    // The ** and * inside backticks should be literal, not converted to <strong>/<em>
+    expect(html).not.toContain("<strong>");
+    expect(html).not.toContain("<em>");
+    expect(html).toContain("<code>");
+  });
+
   // --- Bold ---
 
   it("renders bold with **", () => {
