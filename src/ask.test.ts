@@ -105,4 +105,18 @@ describe("sanitizeFtsQuery", () => {
     // Fallback relaxes filler filtering — should return something
     expect(result.length).toBeGreaterThan(0);
   });
+
+  it("strips non-ASCII characters (CJK, emoji) without crashing", () => {
+    expect(sanitizeFtsQuery("こんにちは")).toBe("");
+    expect(sanitizeFtsQuery("🔍 search")).toBe("search");
+    expect(sanitizeFtsQuery("café database")).toBe("caf database");
+  });
+
+  it("handles extremely long queries without hanging", () => {
+    const longQuery = "webpack ".repeat(500);
+    const result = sanitizeFtsQuery(longQuery);
+    // Should complete quickly and produce a reasonable result
+    expect(result.length).toBeGreaterThan(0);
+    expect(result).toContain("webpack");
+  });
 });
