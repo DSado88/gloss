@@ -383,6 +383,23 @@ describe("server routes", () => {
     expect(data.error).toBeDefined();
   });
 
+  it("POST annotation for nonexistent session returns 404, not 500", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions/nonexistent-session-xyz/annotations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: "orphan-ann",
+        turnIndex: 0,
+        charStart: 0,
+        charEnd: 5,
+        text: "test",
+      }),
+    });
+    expect(res.status).toBe(404);
+    const data = await res.json() as any;
+    expect(data.error).toContain("Session");
+  });
+
   it("POST annotation with malformed JSON returns 400, not 500", async () => {
     const res = await fetch(`${baseUrl}/api/sessions/${SESSION_ID}/annotations`, {
       method: "POST",

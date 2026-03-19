@@ -653,6 +653,11 @@ async function handleApiRouteInner(
   // POST /api/sessions/:id/annotations
   if (getAnnotationsMatch && req.method === "POST") {
     const sessionId = getAnnotationsMatch[1];
+    if (!db.getSession(sessionId)) {
+      return new Response(JSON.stringify({ error: "Session not found" }), {
+        status: 404, headers: jsonHeaders,
+      });
+    }
     const body = (await req.json()) as Record<string, unknown>;
     if (!body.id || typeof body.id !== "string") {
       return new Response(JSON.stringify({ error: "Missing required field: id" }), {
@@ -687,6 +692,11 @@ async function handleApiRouteInner(
   );
   if (putAnnotationMatch && req.method === "PUT") {
     const sessionId = putAnnotationMatch[1];
+    if (!db.getSession(sessionId)) {
+      return new Response(JSON.stringify({ error: "Session not found" }), {
+        status: 404, headers: jsonHeaders,
+      });
+    }
     const annId = putAnnotationMatch[2];
     const body = (await req.json()) as Record<string, unknown>;
     db.upsertAnnotation({
