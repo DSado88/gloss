@@ -501,6 +501,40 @@ describe("buildConversation", () => {
     }
   });
 
+  it("handles non-string text fields inside tool_result content arrays", () => {
+    const file = createJsonl([
+      {
+        type: "assistant",
+        message: { content: [{ type: "text", text: "Running" }] },
+        timestamp: "t1",
+      },
+      {
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              content: [
+                { type: "text", text: 42 },
+                { type: "text", text: "real result" },
+              ],
+              tool_use_id: "tu-num",
+            },
+          ],
+        },
+        timestamp: "t2",
+      },
+    ]);
+    // Should not crash on non-string text inside tool_result content
+    const conv = buildConversation(file);
+    expect(conv.turns).toHaveLength(1);
+    const block = conv.turns[0].blocks[1];
+    expect(block.type).toBe("tool_result");
+    if (block.type === "tool_result") {
+      expect(block.content).toContain("real result");
+    }
+  });
+
   it("detects slash commands in array-format user content", () => {
     const file = createJsonl([
       {

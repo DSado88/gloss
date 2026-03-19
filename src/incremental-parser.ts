@@ -165,7 +165,8 @@ export class IncrementalParser {
                 if (typeof rc === "object" && rc !== null && !Array.isArray(rc)) {
                   const rcObj = rc as Record<string, unknown>;
                   if (rcObj.type === "text") {
-                    const t = (rcObj.text as string) ?? "";
+                    const rawT = rcObj.text;
+                    const t = typeof rawT === "string" ? rawT : rawT != null ? String(rawT) : "";
                     if (t.trim().startsWith("agentId:") || t.trim().startsWith("<usage>")) {
                       metaParts.push(t);
                     } else {
