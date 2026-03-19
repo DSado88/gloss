@@ -298,6 +298,46 @@ describe("discovery", () => {
       expect(record!.model).toBe("claude-opus-4-6");
     });
 
+    it("converts startTime from ISO to Unix seconds and stores all numeric fields", () => {
+      const now = Date.now();
+      syncToDb(db, [{
+        id: "ts-test",
+        path: "/tmp/test/ts.jsonl",
+        startTime: "2024-06-15T12:00:00Z",
+        lastModified: now,
+        fileSize: 54321,
+      }]);
+
+      const session = db.getSession("ts-test");
+      expect(session).not.toBeNull();
+      // ISO → Unix seconds
+      expect(session!.start_time).toBe(Math.floor(new Date("2024-06-15T12:00:00Z").getTime() / 1000));
+      // lastModified ms → seconds
+      expect(session!.last_modified).toBe(Math.floor(now / 1000));
+      expect(session!.file_size).toBe(54321);
+    });
+
+    it("stores null start_time for invalid/missing timestamps without crashing", () => {
+      syncToDb(db, [{
+        id: "no-ts",
+        path: "/tmp/test/no-ts.jsonl",
+        lastModified: Date.now(),
+        fileSize: 100,
+        // no startTime
+      }]);
+      expect(db.getSession("no-ts")!.start_time).toBeNull();
+
+      syncToDb(db, [{
+        id: "bad-ts",
+        path: "/tmp/test/bad-ts.jsonl",
+        startTime: "not-a-date",
+        lastModified: Date.now(),
+        fileSize: 100,
+      }]);
+      // Invalid date → NaN → stored as NULL by SQLite
+      expect(db.getSession("bad-ts")!.start_time).toBeNull();
+    });
+
     it("recounts turns when file shrinks (truncated/replaced)", () => {
       // Write a file with 4 user+assistant pairs
       const projectDir = path.join(tempDir, "proj");
