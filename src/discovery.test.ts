@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { scanProjectsDir, syncToDb, clearDiscoveryCache, backfillTurnCounts, type DiscoveredSession } from "./discovery.js";
+import { scanProjectsDir, syncToDb, clearDiscoveryCache, backfillTurnCounts, backfillFtsIndex, type DiscoveredSession } from "./discovery.js";
 import { openDb, type ConvoDb } from "./db.js";
 
 function makeTempDir(): string {
@@ -316,6 +316,40 @@ describe("discovery", () => {
 
       const session = db.getSession("shrink-test");
       expect(session!.turn_count).toBe(2);
+    });
+
+    it("backfillFtsIndex indexes conversation text for search", () => {
+      const projectDir = path.join(tempDir, "proj");
+      const filePath = path.join(projectDir, "fts-test.jsonl");
+      fs.mkdirSync(projectDir, { recursive: true });
+      const lines = [
+        JSON.stringify({ type: "user", message: { content: "How do I configure webpack?" }, timestamp: "t0" }),
+        JSON.stringify({ type: "assistant", message: { content: "Here is the webpack configuration guide." }, timestamp: "t1" }),
+      ];
+      fs.writeFileSync(filePath, lines.join("\n") + "\n", "utf-8");
+
+      db.upsertSession({ id: "fts-test", jsonl_path: filePath });
+
+      // Run FTS backfill (batch size is 3, so 1 session processes synchronously)
+      backfillFtsIndex(db);
+
+      // The session should now be searchable
+      const results = db.searchSessions("webpack", 10);
+      expect(results.length).toBe(1);
+      expect(results[0].session_id).toBe("fts-test");
+
+      // Non-matching query should return empty
+      const noResults = db.searchSessions("nonexistent_xyzzy_term", 10);
+      expect(noResults.length).toBe(0);
+    });
+
+    it("backfillFtsIndex skips sessions without jsonl_path", () => {
+      db.upsertSession({ id: "no-path" });
+
+      backfillFtsIndex(db);
+
+      // Should not crash, and session should not be indexed
+      expect(db.ftsIndexedCount()).toBe(0);
     });
 
     it("updates path when re-syncing same session with new path", () => {
