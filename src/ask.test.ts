@@ -262,6 +262,19 @@ describe("VectorIndex", () => {
     expect(results).toEqual([]);
   });
 
+  it("addSession with empty entries removes stale vectors for that session", () => {
+    const index = VectorIndex.fromDb(db);
+    index.addSession("s1", [
+      { turnIndex: 0, role: "user", embedding: makeVec(0, 1) },
+    ]);
+    expect(index.count).toBe(1);
+
+    // Re-add with empty entries — should clear s1's vectors, not leave stale ones
+    index.addSession("s1", []);
+    expect(index.count).toBe(0);
+    expect(index.search(makeVec(0, 1), 10)).toEqual([]);
+  });
+
   it("addSession and removeSession update the index correctly", () => {
     const index = VectorIndex.fromDb(db); // empty
     expect(index.count).toBe(0);

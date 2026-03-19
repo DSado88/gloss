@@ -349,10 +349,9 @@ export class VectorIndex {
       embedding: Float32Array;
     }>,
   ): void {
-    if (entries.length === 0) return;
-
-    // Remove stale vectors for this session before appending new ones
+    // Always remove stale vectors first — even for empty entries (re-index with no content)
     this.removeSession(sessionId);
+    if (entries.length === 0) return;
 
     const newCount = this._count + entries.length;
     const newVectors = new Float32Array(newCount * EMBEDDING_DIMS);
