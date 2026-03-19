@@ -402,10 +402,18 @@ export class ConvoDb {
     const clauses: string[] = [];
     const params: SQLQueryBindings[] = [];
 
-    // FTS match
+    // FTS match — sanitize special chars to prevent FTS5 syntax errors
     if (query) {
-      clauses.push("a.rowid IN (SELECT rowid FROM annotations_fts WHERE annotations_fts MATCH ?)");
-      params.push(query);
+      const safeQuery = query
+        .replace(/[":*^~(){}[\]<>+\-!|&\\/]/g, " ")
+        .split(/\s+/)
+        .filter((t) => t.length > 0 && !/^(AND|OR|NOT|NEAR)$/i.test(t))
+        .join(" ")
+        .trim();
+      if (safeQuery) {
+        clauses.push("a.rowid IN (SELECT rowid FROM annotations_fts WHERE annotations_fts MATCH ?)");
+        params.push(safeQuery);
+      }
     }
 
     if (opts?.sessionId) {

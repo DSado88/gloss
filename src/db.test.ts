@@ -374,6 +374,14 @@ describe("ConvoDb", () => {
       expect(newResults).toHaveLength(1);
     });
 
+    it("handles FTS5 special characters without throwing", () => {
+      // These should not throw — FTS5 syntax errors from special chars must be handled
+      expect(() => db.searchAnnotations('"unclosed quote')).not.toThrow();
+      expect(() => db.searchAnnotations("(unmatched")).not.toThrow();
+      expect(() => db.searchAnnotations("OR AND NOT")).not.toThrow();
+      expect(() => db.searchAnnotations('hello "world')).not.toThrow();
+    });
+
     it("FTS stays in sync after delete", () => {
       db.deleteAnnotation("ann-alpha");
       const results = db.searchAnnotations("machine learning");
