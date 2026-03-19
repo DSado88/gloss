@@ -596,6 +596,23 @@ describe("buildConversation", () => {
     expect(conv.turns[0].blocks[0]).toEqual({ type: "text", text: "Real message" });
   });
 
+  it("coerces non-string metadata fields (model, version, cwd, sessionId) to strings", () => {
+    const file = createJsonl([
+      { type: "user", sessionId: 999, cwd: 42, version: 2,
+        message: { content: "Hi", model: 3, sessionId: 888 }, timestamp: "t1" },
+    ]);
+    const conv = buildConversation(file);
+    // All metadata should be strings, not numbers — escape() crashes on non-strings
+    expect(typeof conv.model).toBe("string");
+    expect(conv.model).toBe("3");
+    expect(typeof conv.version).toBe("string");
+    expect(conv.version).toBe("2");
+    expect(typeof conv.projectDir).toBe("string");
+    expect(conv.projectDir).toBe("42");
+    expect(typeof conv.sessionId).toBe("string");
+    expect(conv.sessionId).toBe("888"); // message.sessionId preferred over root
+  });
+
   it("coerces non-string timestamp to string (prevents silent data loss)", () => {
     const file = createJsonl([
       { type: "user", message: { content: "Hi" }, timestamp: 1710000000 },

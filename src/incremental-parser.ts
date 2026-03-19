@@ -41,18 +41,20 @@ export class IncrementalParser {
 
       const message = (obj.message as Record<string, unknown>) ?? {};
 
-      // Grab metadata on first occurrence
+      // Grab metadata on first occurrence — coerce to string for safety
       if (!this.sessionId) {
-        const msgSid = message.sessionId as string | undefined;
-        const rootSid = obj.sessionId as string | undefined;
-        if (msgSid) this.sessionId = msgSid;
-        else if (rootSid) this.sessionId = rootSid;
+        const msgSid = message.sessionId;
+        const rootSid = obj.sessionId;
+        if (msgSid) this.sessionId = typeof msgSid === "string" ? msgSid : String(msgSid);
+        else if (rootSid) this.sessionId = typeof rootSid === "string" ? rootSid : String(rootSid);
       }
       if (!this.projectDir && obj.cwd) {
-        this.projectDir = obj.cwd as string;
+        const raw = obj.cwd;
+        this.projectDir = typeof raw === "string" ? raw : String(raw);
       }
       if (!this.version && obj.version) {
-        this.version = obj.version as string;
+        const raw = obj.version;
+        this.version = typeof raw === "string" ? raw : String(raw);
       }
 
       const msgType = obj.type as string | undefined;
@@ -66,7 +68,8 @@ export class IncrementalParser {
         this.startTime = timestamp;
       }
       if (!this.model && message.model) {
-        this.model = message.model as string;
+        const raw = message.model;
+        this.model = typeof raw === "string" ? raw : String(raw);
       }
 
       let hasUserText = false;
