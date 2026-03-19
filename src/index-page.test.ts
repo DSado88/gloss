@@ -146,6 +146,28 @@ describe("buildServerIndex project decoding", () => {
     expect(parsed[2].project).toBe("");
   });
 
+  it("embeds settings in the client JS block", () => {
+    const sessions: SessionRecord[] = [{ id: "s1" }];
+    const html = buildServerIndex(sessions, {
+      embeddings_enabled: true,
+      min_turns: 10,
+    });
+    const settingsMatch = html.match(/const SETTINGS = (.*?);[\r\n]/s);
+    expect(settingsMatch).not.toBeNull();
+    const settings = JSON.parse(settingsMatch![1]);
+    expect(settings.embeddings_enabled).toBe(true);
+    expect(settings.min_turns).toBe(10);
+  });
+
+  it("uses default settings when none provided", () => {
+    const sessions: SessionRecord[] = [{ id: "s1" }];
+    const html = buildServerIndex(sessions);
+    const settingsMatch = html.match(/const SETTINGS = (.*?);[\r\n]/s);
+    const settings = JSON.parse(settingsMatch![1]);
+    expect(settings.embeddings_enabled).toBe(false);
+    expect(settings.min_turns).toBe(0);
+  });
+
   it("decodes project from jsonl_path with hyphenated username", () => {
     const sessions: SessionRecord[] = [{
       id: "hyph-test",
