@@ -596,6 +596,32 @@ describe("buildConversation", () => {
     expect(conv.turns[0].blocks[0]).toEqual({ type: "text", text: "Real message" });
   });
 
+  it("coerces non-string tool_use_id in tool_result to string", () => {
+    const file = createJsonl([
+      {
+        type: "assistant",
+        message: { content: [{ type: "text", text: "checking" }] },
+        timestamp: "t1",
+      },
+      {
+        type: "user",
+        message: {
+          content: [
+            { type: "tool_result", content: "data", tool_use_id: 42 },
+          ],
+        },
+        timestamp: "t2",
+      },
+    ]);
+    const conv = buildConversation(file);
+    const block = conv.turns[0].blocks[1];
+    expect(block.type).toBe("tool_result");
+    if (block.type === "tool_result") {
+      expect(typeof block.toolUseId).toBe("string");
+      expect(block.toolUseId).toBe("42");
+    }
+  });
+
   it("coerces non-string tool_use name/id to strings (prevents renderer crash)", () => {
     const file = createJsonl([
       {

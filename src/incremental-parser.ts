@@ -185,12 +185,13 @@ export class IncrementalParser {
               resultText = typeof resultContent === "string" ? resultContent : String(resultContent);
             }
 
+            const rawToolUseId = block.tool_use_id;
             parsedBlocks.push({
               type: "tool_result",
               content: resultText,
               meta: metaText,
               isError,
-              toolUseId: (block.tool_use_id as string) ?? "",
+              toolUseId: typeof rawToolUseId === "string" ? rawToolUseId : rawToolUseId != null ? String(rawToolUseId) : "",
             });
           }
         }
