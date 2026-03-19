@@ -363,6 +363,45 @@ describe("server routes", () => {
   });
 
   // -----------------------------------------------------------------------
+  // Malformed request handling
+  // -----------------------------------------------------------------------
+
+  it("POST annotation with malformed JSON returns 400, not 500", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions/${SESSION_ID}/annotations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "not valid json{{{",
+    });
+    expect(res.status).toBe(400);
+    const data = await res.json() as any;
+    expect(data.error).toBeDefined();
+  });
+
+  it("PUT annotation with malformed JSON returns 400", async () => {
+    const res = await fetch(
+      `${baseUrl}/api/sessions/${SESSION_ID}/annotations/some-ann-id`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: "{broken",
+      },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("PATCH title with malformed JSON returns 400", async () => {
+    const res = await fetch(
+      `${baseUrl}/api/sessions/${SESSION_ID}/title`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: "{{invalid}}",
+      },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  // -----------------------------------------------------------------------
   // API 404s
   // -----------------------------------------------------------------------
 

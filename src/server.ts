@@ -614,6 +614,30 @@ export async function handleApiRoute(
 ): Promise<Response> {
   const jsonHeaders = { "Content-Type": "application/json; charset=utf-8" };
 
+  try {
+    return await handleApiRouteInner(req, pathname, db, search);
+  } catch (err) {
+    if (err instanceof SyntaxError) {
+      return new Response(JSON.stringify({ error: "Invalid JSON in request body" }), {
+        status: 400,
+        headers: jsonHeaders,
+      });
+    }
+    return new Response(JSON.stringify({ error: "Internal server error" }), {
+      status: 500,
+      headers: jsonHeaders,
+    });
+  }
+}
+
+async function handleApiRouteInner(
+  req: Request,
+  pathname: string,
+  db: ConvoDb,
+  search?: { embeddingEngine?: EmbeddingEngine; vectorIndex?: VectorIndex | null },
+): Promise<Response> {
+  const jsonHeaders = { "Content-Type": "application/json; charset=utf-8" };
+
   // GET /api/sessions/:id/annotations
   const getAnnotationsMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/annotations$/);
   if (getAnnotationsMatch && req.method === "GET") {
