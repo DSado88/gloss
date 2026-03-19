@@ -16,6 +16,8 @@ export interface AskSource {
   matchTurnIndex: number;
   turns: Turn[];
   startTurnIndex: number;
+  score?: number;
+  matchedTokens?: string[];
 }
 
 export interface AskResult {
@@ -379,10 +381,11 @@ export async function searchForSources(
     rrfScores.set(id, score);
   }
 
-  const finalSessionIds = [...rrfScores.entries()]
+  const finalSessionEntries = [...rrfScores.entries()]
     .sort((a, b) => b[1] - a[1])
-    .slice(0, maxSources)
-    .map(([id]) => id);
+    .slice(0, maxSources);
+  const finalSessionIds = finalSessionEntries.map(([id]) => id);
+  const finalScores = new Map(finalSessionEntries);
 
   console.log(`[ask] RRF selected ${finalSessionIds.length} sessions (FTS:${ftsRanked.length} Vec:${vectorRanked.length} Meta:${metadataRanked.length})`);
 
@@ -453,6 +456,8 @@ export async function searchForSources(
         matchTurnIndex: matchIdx,
         turns: turnSlice,
         startTurnIndex: lo,
+        score: finalScores.get(sessionId),
+        matchedTokens: localTerms.length > 0 ? localTerms : ftsTokens,
       });
     }
   }

@@ -68,7 +68,41 @@ interface Source {
   project: string;
   title: string;
   matchTurnIndex: number;
+  startTurnIndex?: number;
+  endTurnIndex?: number;
+  score?: number;
+  matchedTokens?: string[];
   turns: SourceTurn[];
+}
+
+/** Truncate text at a semantic boundary (paragraph/sentence/code block). */
+function smartTruncate(text: string, limit: number): string {
+  if (text.length <= limit) return text;
+
+  let cut = text.slice(0, limit);
+
+  // Don't break inside a fenced code block — close it if needed
+  const openFences = (cut.match(/^```/gm) || []).length;
+  if (openFences % 2 !== 0) {
+    // Odd number of fences = unclosed block. Try to include the closing fence.
+    const nextFence = text.indexOf("\n```", limit);
+    if (nextFence >= 0 && nextFence < limit + 500) {
+      // Close fence is nearby — include it
+      const fenceEnd = text.indexOf("\n", nextFence + 1);
+      cut = text.slice(0, fenceEnd >= 0 ? fenceEnd : nextFence + 4);
+    } else {
+      // Close fence is far away — append one
+      cut += "\n```";
+    }
+  }
+
+  // Try to cut at a paragraph boundary
+  const lastDoubleNewline = cut.lastIndexOf("\n\n");
+  if (lastDoubleNewline > limit * 0.6) {
+    cut = cut.slice(0, lastDoubleNewline);
+  }
+
+  return cut + "\n... [truncated]";
 }
 
 function formatSources(sources: Source[], verbose: boolean): string {
@@ -78,22 +112,26 @@ function formatSources(sources: Source[], verbose: boolean): string {
   for (const src of sources) {
     const label = src.title || src.project || src.sessionId;
     const proj = src.project.split("/").pop() || src.project;
-    parts.push(`── Source ${src.num}: ${label} [${proj}] ──`);
-    parts.push(`   Session: ${src.sessionId} | Turn: ${src.matchTurnIndex}`);
+    const scorePart = src.score != null ? ` | relevance: ${src.score}` : "";
+    const rangePart = src.startTurnIndex != null && src.endTurnIndex != null
+      ? ` | turns ${src.startTurnIndex}-${src.endTurnIndex}`
+      : "";
+    const tokensPart = src.matchedTokens?.length
+      ? ` | matched: ${src.matchedTokens.slice(0, 6).join(", ")}`
+      : "";
+
+    parts.push(`── Source ${src.num}: ${label} [${proj}]${scorePart} ──`);
+    parts.push(`   Session: ${src.sessionId} | Match: turn ${src.matchTurnIndex}${rangePart}${tokensPart}`);
 
     if (verbose) {
-      // Full turn text — for deep searches with few sources
       for (const t of src.turns) {
         const role = t.role === "user" ? "Human" : "Assistant";
-        const text = t.text.length > 3000
-          ? t.text.slice(0, 3000) + "\n... [truncated]"
-          : t.text;
+        const text = smartTruncate(t.text, 3000);
         parts.push(`   [Turn ${t.index}] ${role}:`);
         parts.push(`   ${text.split("\n").join("\n   ")}`);
         parts.push("");
       }
     } else {
-      // Preview mode — short excerpts, let Claude drill in with read_conversation
       for (const t of src.turns) {
         const role = t.role === "user" ? "Human" : "Assistant";
         const preview = t.text.slice(0, 200).replace(/\n/g, " ").trim();

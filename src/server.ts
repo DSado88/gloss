@@ -790,6 +790,9 @@ async function handleApiRouteInner(
       title: s.title,
       matchTurnIndex: s.matchTurnIndex,
       startTurnIndex: s.startTurnIndex,
+      endTurnIndex: s.startTurnIndex + s.turns.length - 1,
+      score: s.score != null ? Math.round(s.score * 1000) / 1000 : undefined,
+      matchedTokens: s.matchedTokens,
       turns: s.turns.map((t, ti) => ({
         role: t.role,
         index: s.startTurnIndex + ti,
