@@ -828,4 +828,76 @@ describe("ConvoDb", () => {
       expect(gammaHits.length).toBe(1);
     });
   });
+
+  // -----------------------------------------------------------------------
+  // Embeddings CRUD
+  // -----------------------------------------------------------------------
+
+  describe("embeddings", () => {
+    function makeEmbedding(dim: number): Float32Array {
+      const vec = new Float32Array(256);
+      vec[dim % 256] = 1.0;
+      return vec;
+    }
+
+    it("storeEmbeddings and loadAllEmbeddings round-trip correctly", () => {
+      db.upsertSession({ id: "emb-s1" });
+      db.storeEmbeddings("emb-s1", [
+        { turnIndex: 0, role: "user", textHash: "h1", embedding: makeEmbedding(0) },
+        { turnIndex: 1, role: "assistant", textHash: "h2", embedding: makeEmbedding(1) },
+      ], 100);
+
+      const data = db.loadAllEmbeddings();
+      expect(data.sessionIds).toHaveLength(2);
+      expect(data.sessionIds[0]).toBe("emb-s1");
+      expect(data.turnIndices[0]).toBe(0);
+      expect(data.turnIndices[1]).toBe(1);
+      expect(data.embeddings[0][0]).toBeCloseTo(1.0);
+      expect(data.embeddings[1][1]).toBeCloseTo(1.0);
+    });
+
+    it("embeddingNeedsIndexing returns true for unindexed sessions", () => {
+      expect(db.embeddingNeedsIndexing("never-indexed", 100)).toBe(true);
+    });
+
+    it("embeddingNeedsIndexing returns false when mtime unchanged", () => {
+      db.upsertSession({ id: "emb-s2" });
+      db.storeEmbeddings("emb-s2", [
+        { turnIndex: 0, role: "user", textHash: "h", embedding: makeEmbedding(0) },
+      ], 200);
+      expect(db.embeddingNeedsIndexing("emb-s2", 200)).toBe(false);
+      expect(db.embeddingNeedsIndexing("emb-s2", 300)).toBe(true);
+    });
+
+    it("removeEmbeddings clears data and resets indexing status", () => {
+      db.upsertSession({ id: "emb-s3" });
+      db.storeEmbeddings("emb-s3", [
+        { turnIndex: 0, role: "user", textHash: "h", embedding: makeEmbedding(0) },
+      ], 100);
+      expect(db.embeddingIndexedCount()).toBe(1);
+
+      db.removeEmbeddings("emb-s3");
+      expect(db.loadAllEmbeddings().sessionIds).toHaveLength(0);
+      expect(db.embeddingIndexedCount()).toBe(0);
+      // After removal, session needs re-indexing
+      expect(db.embeddingNeedsIndexing("emb-s3", 100)).toBe(true);
+    });
+
+    it("storeEmbeddings replaces existing embeddings atomically", () => {
+      db.upsertSession({ id: "emb-s4" });
+      db.storeEmbeddings("emb-s4", [
+        { turnIndex: 0, role: "user", textHash: "old", embedding: makeEmbedding(0) },
+      ], 100);
+      // Re-store with different data
+      db.storeEmbeddings("emb-s4", [
+        { turnIndex: 0, role: "user", textHash: "new", embedding: makeEmbedding(5) },
+        { turnIndex: 1, role: "assistant", textHash: "new2", embedding: makeEmbedding(6) },
+      ], 200);
+
+      const data = db.loadAllEmbeddings();
+      const s4 = data.sessionIds.filter((id) => id === "emb-s4");
+      expect(s4).toHaveLength(2); // replaced 1 with 2
+      expect(data.embeddings[data.sessionIds.indexOf("emb-s4")][5]).toBeCloseTo(1.0);
+    });
+  });
 });
