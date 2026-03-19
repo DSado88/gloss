@@ -238,6 +238,34 @@ describe("updateIndex", () => {
     expect(content).not.toContain('onmouseover="alert');
   });
 
+  it("parses CONVO_META with \\u003e escaping from convert.ts", () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "convo-test-"));
+
+    // Simulate the escaping that convert.ts does: > becomes \u003e
+    const rawMeta = {
+      session_id: "esc-test",
+      short_id: "esc-test",
+      project_dir: "/home/user/project-->name",
+      model: "claude-3",
+      start_time: "2024-06-01T12:00:00Z",
+      turn_count: 5,
+      user_turns: 2,
+    };
+    const safeMetaJson = JSON.stringify(rawMeta).replace(/>/g, "\\u003e");
+
+    fs.writeFileSync(
+      path.join(tmpDir, "esc-test.html"),
+      `<!-- CONVO_META:${safeMetaJson} -->\n<html></html>`,
+    );
+
+    updateIndex(tmpDir);
+
+    const content = fs.readFileSync(path.join(tmpDir, "index.html"), "utf-8");
+    expect(content).toContain("1 sessions");
+    // The project_dir should have the original > restored by JSON.parse
+    expect(content).toContain("project--&gt;name");
+  });
+
   it("produces empty-state when no conversation files exist", () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "convo-test-"));
 
