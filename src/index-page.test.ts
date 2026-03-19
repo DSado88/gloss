@@ -31,6 +31,12 @@ describe("shortenModel", () => {
   it("returns em dash for empty string", () => {
     expect(shortenModel("")).toBe("\u2014");
   });
+
+  it("strips both anthropic/ prefix and date suffix together", () => {
+    // Most common real-world format
+    expect(shortenModel("anthropic/claude-3-5-sonnet-20241022")).toBe("3-5-sonnet");
+    expect(shortenModel("anthropic/claude-opus-4-20250514")).toBe("opus-4");
+  });
 });
 
 describe("formatIndexTime", () => {
@@ -296,6 +302,36 @@ describe("updateIndex", () => {
     expect(content).toContain("1 sessions");
     // The project_dir should have the original > restored by JSON.parse
     expect(content).toContain("project--&gt;name");
+  });
+
+  it("ignores HTML files without CONVO_META comment", () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "convo-test-"));
+
+    // One file with meta, one without
+    const meta = JSON.stringify({
+      session_id: "real-one",
+      short_id: "real",
+      project_dir: "/tmp",
+      model: "claude-3",
+      start_time: "2024-06-01T12:00:00Z",
+      turn_count: 5,
+      user_turns: 2,
+    });
+    fs.writeFileSync(
+      path.join(tmpDir, "real.html"),
+      `<!-- CONVO_META:${meta} -->\n<html></html>`,
+    );
+    // Non-Gloss HTML file (no CONVO_META)
+    fs.writeFileSync(
+      path.join(tmpDir, "random.html"),
+      "<html><body>Not a conversation</body></html>",
+    );
+
+    updateIndex(tmpDir);
+
+    const content = fs.readFileSync(path.join(tmpDir, "index.html"), "utf-8");
+    expect(content).toContain("1 sessions"); // only the one with meta
+    expect(content).toContain("real");
   });
 
   it("produces empty-state when no conversation files exist", () => {
