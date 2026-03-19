@@ -798,6 +798,58 @@ describe("ConvoDb", () => {
   });
 
   // -----------------------------------------------------------------------
+  // FTS: indexing gate and turn-level search
+  // -----------------------------------------------------------------------
+
+  describe("ftsNeedsIndexing", () => {
+    it("returns true for never-indexed session", () => {
+      expect(db.ftsNeedsIndexing("never-indexed", 100)).toBe(true);
+    });
+
+    it("returns false when mtime unchanged", () => {
+      db.upsertSession({ id: "fts-gate" });
+      db.indexSession("fts-gate", [{ role: "user", text: "hello" }], 200);
+      expect(db.ftsNeedsIndexing("fts-gate", 200)).toBe(false);
+    });
+
+    it("returns true when file is newer than last index", () => {
+      db.upsertSession({ id: "fts-gate2" });
+      db.indexSession("fts-gate2", [{ role: "user", text: "hello" }], 100);
+      expect(db.ftsNeedsIndexing("fts-gate2", 200)).toBe(true);
+    });
+  });
+
+  describe("searchConversations (turn-level)", () => {
+    it("returns turn-level results with role and turn_index", () => {
+      db.upsertSession({ id: "conv-search" });
+      db.indexSession("conv-search", [
+        { role: "user", text: "How does webpack bundling work?" },
+        { role: "assistant", text: "Webpack bundles JavaScript modules together." },
+      ], 100);
+
+      const results = db.searchConversations("webpack", 10);
+      expect(results.length).toBeGreaterThanOrEqual(1);
+      expect(results[0].session_id).toBe("conv-search");
+      expect(typeof results[0].turn_index).toBe("number");
+      expect(typeof results[0].role).toBe("string");
+      expect(typeof results[0].rank).toBe("number");
+    });
+
+    it("returns results from the correct turn index", () => {
+      db.upsertSession({ id: "turn-idx" });
+      db.indexSession("turn-idx", [
+        { role: "user", text: "generic question" },
+        { role: "assistant", text: "answer with unique_zxcvbn_keyword" },
+      ], 100);
+
+      const results = db.searchConversations("unique_zxcvbn_keyword", 10);
+      expect(results.length).toBe(1);
+      expect(results[0].turn_index).toBe(1); // assistant turn
+      expect(results[0].role).toBe("assistant");
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // FTS: empty query edge case
   // -----------------------------------------------------------------------
 
