@@ -213,6 +213,28 @@ describe("discovery", () => {
       expect(second.changedCount).toBe(0); // served from cache
     });
 
+    it("changedCount includes both new files and deleted cache entries", () => {
+      const projectDir = path.join(tempDir, "proj");
+      const file1 = path.join(projectDir, "a.jsonl");
+      const file2 = path.join(projectDir, "b.jsonl");
+      writeMinimalJsonl(file1, "aaa");
+      writeMinimalJsonl(file2, "bbb");
+
+      const first = scanProjectsDir(tempDir);
+      expect(first.changedCount).toBe(2);
+      expect(first.sessions).toHaveLength(2);
+
+      // Delete one, add a new one in the same scan
+      fs.unlinkSync(file1);
+      writeMinimalJsonl(path.join(projectDir, "c.jsonl"), "ccc");
+
+      const second = scanProjectsDir(tempDir);
+      expect(second.sessions).toHaveLength(2); // bbb (cached) + ccc (new)
+      expect(second.changedCount).toBe(2); // 1 new file + 1 deleted cache entry
+      const ids = second.sessions.map((s) => s.id).sort();
+      expect(ids).toEqual(["bbb", "ccc"]);
+    });
+
     it("cleans cache entries when files are deleted between scans", () => {
       const projectDir = path.join(tempDir, "proj");
       const filePath = path.join(projectDir, "ephemeral.jsonl");
