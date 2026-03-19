@@ -168,6 +168,27 @@ describe("discovery", () => {
       }
     });
 
+    it("discovers JSONL files in deeply nested directories", () => {
+      const deepDir = path.join(tempDir, "proj", "nested", "deeper");
+      writeMinimalJsonl(path.join(deepDir, "deep-session.jsonl"), "deep-session");
+
+      const { sessions } = scanProjectsDir(tempDir);
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].id).toBe("deep-session");
+    });
+
+    it("discovers multiple JSONL files in the same project directory", () => {
+      const projectDir = path.join(tempDir, "-Users-test-project");
+      writeMinimalJsonl(path.join(projectDir, "aaa.jsonl"), "aaa");
+      writeMinimalJsonl(path.join(projectDir, "bbb.jsonl"), "bbb");
+      writeMinimalJsonl(path.join(projectDir, "ccc.jsonl"), "ccc");
+
+      const { sessions } = scanProjectsDir(tempDir);
+      expect(sessions).toHaveLength(3);
+      const ids = sessions.map((s) => s.id).sort();
+      expect(ids).toEqual(["aaa", "bbb", "ccc"]);
+    });
+
     it("handles empty directory gracefully", () => {
       const { sessions } = scanProjectsDir(tempDir);
       expect(sessions).toEqual([]);
