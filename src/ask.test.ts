@@ -208,6 +208,35 @@ describe("VectorIndex", () => {
     expect(results[1].score).toBeCloseTo(0.0);
   });
 
+  it("searchSessions aggregates per-session and returns best turn index", () => {
+    const index = VectorIndex.fromDb(db); // empty
+
+    // s1: two turns, dim 0 and dim 2
+    index.addSession("s1", [
+      { turnIndex: 0, role: "user", embedding: makeVec(0, 1) },    // strong match
+      { turnIndex: 1, role: "assistant", embedding: makeVec(2, 1) }, // weak match
+    ]);
+    // s2: one turn, dim 1
+    index.addSession("s2", [
+      { turnIndex: 0, role: "user", embedding: makeVec(1, 1) },
+    ]);
+
+    // Query along dim 0 — s1 turn 0 is the best match
+    const results = index.searchSessions(makeVec(0, 1), 10);
+    expect(results.length).toBe(2);
+    expect(results[0].sessionId).toBe("s1");
+    expect(results[0].bestTurnIndex).toBe(0);   // turn 0 had highest score
+    expect(results[0].matchCount).toBe(2);       // 2 turns in the session
+    expect(results[0].bestScore).toBeCloseTo(1.0);
+    expect(results[1].sessionId).toBe("s2");
+  });
+
+  it("searchSessions returns empty for empty index", () => {
+    const index = VectorIndex.fromDb(db);
+    const results = index.searchSessions(makeVec(0, 1), 10);
+    expect(results).toEqual([]);
+  });
+
   it("addSession and removeSession update the index correctly", () => {
     const index = VectorIndex.fromDb(db); // empty
     expect(index.count).toBe(0);
