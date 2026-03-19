@@ -735,7 +735,7 @@ async function handleApiRouteInner(
     const sessionId = dataMatch[1];
     const session = db.getSession(sessionId);
     if (!session?.jsonl_path || !fs.existsSync(session.jsonl_path)) {
-      return new Response("Not found", { status: 404 });
+      return new Response(JSON.stringify({ error: "Session not found" }), { status: 404, headers: jsonHeaders });
     }
     // Guard against OOM — same limit as renderConversationPage
     try {

@@ -449,9 +449,12 @@ describe("server routes", () => {
     expect(data[0]).toHaveProperty("text");
   });
 
-  it("GET /api/sessions/:id/data returns 404 for nonexistent session", async () => {
+  it("GET /api/sessions/:id/data returns 404 JSON for nonexistent session", async () => {
     const res = await fetch(`${baseUrl}/api/sessions/nonexistent-xyz/data`);
     expect(res.status).toBe(404);
+    // API endpoints should return JSON consistently, not plain text
+    const data = await res.json() as any;
+    expect(data.error).toBeDefined();
   });
 
   // -----------------------------------------------------------------------
