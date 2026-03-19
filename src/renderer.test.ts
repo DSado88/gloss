@@ -195,6 +195,30 @@ describe("renderToolResult", () => {
     expect(html).toContain("\u2026"); // ellipsis character
   });
 
+  it("renders empty tool result without crashing", () => {
+    const block: ToolResultBlock = {
+      type: "tool_result",
+      content: "",
+    };
+    const html = renderToolResult(block);
+    expect(html).toContain("tool-result");
+    expect(html).toContain("Result");
+    // Should not show char count for empty content
+    expect(html).not.toContain("chars");
+    expect(html).not.toContain("tool-error");
+  });
+
+  it("renders tool result with undefined content field", () => {
+    const block: ToolResultBlock = {
+      type: "tool_result",
+      // content omitted — should default to ""
+    } as ToolResultBlock;
+    const html = renderToolResult(block);
+    expect(html).toContain("tool-result");
+    // Should not crash
+    expect(html).toContain("Result");
+  });
+
   it("counts emoji as single code points, not UTF-16 pairs, in char display", () => {
     // "😀" is 1 code point but 2 UTF-16 code units (.length = 2)
     // 2500 emoji = 2500 code points (correct) vs 5000 .length (wrong)
