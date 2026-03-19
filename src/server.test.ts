@@ -438,6 +438,66 @@ describe("server routes", () => {
   });
 
   // -----------------------------------------------------------------------
+  // Search API
+  // -----------------------------------------------------------------------
+
+  it("GET /api/search with empty q returns empty results", async () => {
+    const res = await fetch(`${baseUrl}/api/search`);
+    expect(res.status).toBe(200);
+    const data = await res.json() as any;
+    expect(data.results).toEqual([]);
+    expect(data).toHaveProperty("indexed");
+  });
+
+  it("GET /api/search with valid q returns 200 (even with no FTS data)", async () => {
+    const res = await fetch(`${baseUrl}/api/search?q=hello`);
+    expect(res.status).toBe(200);
+    const data = await res.json() as any;
+    expect(Array.isArray(data.results)).toBe(true);
+  });
+
+  it("GET /api/search with FTS-invalid query returns error gracefully", async () => {
+    const res = await fetch(`${baseUrl}/api/search?q=${encodeURIComponent('"unclosed')}`);
+    expect(res.status).toBe(200);
+    const data = await res.json() as any;
+    expect(data.results).toEqual([]);
+    expect(data.error).toBeDefined();
+  });
+
+  // -----------------------------------------------------------------------
+  // Settings API
+  // -----------------------------------------------------------------------
+
+  it("GET /api/settings returns settings object", async () => {
+    const res = await fetch(`${baseUrl}/api/settings`);
+    expect(res.status).toBe(200);
+    const data = await res.json() as any;
+    expect(data).toHaveProperty("embeddings_enabled");
+    expect(data).toHaveProperty("min_turns");
+    expect(typeof data.min_turns).toBe("number");
+  });
+
+  it("PATCH /api/settings updates min_turns", async () => {
+    const res = await fetch(`${baseUrl}/api/settings`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ min_turns: 5 }),
+    });
+    expect(res.status).toBe(200);
+
+    const getRes = await fetch(`${baseUrl}/api/settings`);
+    const data = await getRes.json() as any;
+    expect(data.min_turns).toBe(5);
+
+    // Reset to 0
+    await fetch(`${baseUrl}/api/settings`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ min_turns: 0 }),
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // API 404s
   // -----------------------------------------------------------------------
 
