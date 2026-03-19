@@ -3,6 +3,7 @@ import { writeFileSync, unlinkSync, mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { buildConversation } from "./parser.js";
+import { IncrementalParser } from "./incremental-parser.js";
 
 function writeTempJsonl(lines: unknown[]): string {
   const dir = mkdtempSync(join(tmpdir(), "parser-test-"));
@@ -670,5 +671,89 @@ describe("buildConversation", () => {
     ]);
     const conv = buildConversation(file);
     expect(conv.turns[0].blocks[0]).toEqual({ type: "text", text: "Hello  world" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Incremental parsing (feedLines called multiple times)
+// ---------------------------------------------------------------------------
+
+describe("IncrementalParser incremental feeding", () => {
+  it("folds tool_result across separate feedLines batches", () => {
+    const parser = new IncrementalParser();
+
+    // Batch 1: assistant with tool_use
+    const batch1 = parser.feedLines([
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            { type: "text", text: "Let me check." },
+            { type: "tool_use", name: "Read", input: { file_path: "/f" }, id: "tu-1" },
+          ],
+        },
+        timestamp: "t1",
+      }),
+    ]);
+    expect(batch1).toHaveLength(1);
+    expect(batch1[0].type).toBe("new_turn");
+    expect(parser.getTurns()).toHaveLength(1);
+
+    // Batch 2: user tool_result only (should fold into assistant turn)
+    const batch2 = parser.feedLines([
+      JSON.stringify({
+        type: "user",
+        message: {
+          content: [
+            { type: "tool_result", content: "file contents", tool_use_id: "tu-1" },
+          ],
+        },
+        timestamp: "t2",
+      }),
+    ]);
+    expect(batch2).toHaveLength(1);
+    expect(batch2[0].type).toBe("update_turn");
+    expect(batch2[0].turnIndex).toBe(0);
+    // Still one turn — tool_result folded into assistant
+    expect(parser.getTurns()).toHaveLength(1);
+    expect(parser.getTurns()[0].role).toBe("assistant");
+    expect(parser.getTurns()[0].blocks).toHaveLength(3);
+  });
+
+  it("merges consecutive same-role messages across batches", () => {
+    const parser = new IncrementalParser();
+
+    parser.feedLines([
+      JSON.stringify({ type: "user", message: { content: "First" }, timestamp: "t1" }),
+    ]);
+    expect(parser.getTurns()).toHaveLength(1);
+
+    // Second user message in separate batch should merge
+    const updates = parser.feedLines([
+      JSON.stringify({ type: "user", message: { content: "Second" }, timestamp: "t2" }),
+    ]);
+    expect(updates[0].type).toBe("update_turn");
+    expect(parser.getTurns()).toHaveLength(1);
+    expect(parser.getTurns()[0].blocks).toHaveLength(2);
+  });
+
+  it("accumulates metadata across batches", () => {
+    const parser = new IncrementalParser();
+
+    // Batch 1: system line with sessionId + cwd
+    parser.feedLines([
+      JSON.stringify({ type: "system", sessionId: "sess-inc", cwd: "/project", version: "1.0" }),
+    ]);
+
+    // Batch 2: user message with model
+    parser.feedLines([
+      JSON.stringify({ type: "user", message: { content: "Hi", model: "claude-4" }, timestamp: "t1" }),
+    ]);
+
+    const meta = parser.getMetadata();
+    expect(meta.sessionId).toBe("sess-inc");
+    expect(meta.projectDir).toBe("/project");
+    expect(meta.model).toBe("claude-4");
+    expect(meta.startTime).toBe("t1");
   });
 });
