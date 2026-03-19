@@ -104,6 +104,25 @@ describe("buildHtmlPage dual mode", () => {
   });
 
   // -----------------------------------------------------------------------
+  // Security: page-config escaping
+  // -----------------------------------------------------------------------
+
+  describe("page-config script safety", () => {
+    it("escapes </ in page-config JSON to prevent script breakout", () => {
+      const html = buildHtmlPage(makeParams({
+        mode: "server",
+        wsUrl: "ws://localhost:3456/ws/test",
+        sessionId: 'x</script><script>alert(1)//',
+      }));
+      // The page-config JSON must survive intact (not truncated by unescaped </script>)
+      const match = html.match(/id="page-config">([\s\S]*?)<\/script>/);
+      expect(match).not.toBeNull();
+      const parsed = JSON.parse(match![1]);
+      expect(parsed.sessionId).toBe('x</script><script>alert(1)//');
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Mode switching doesn't leak
   // -----------------------------------------------------------------------
 

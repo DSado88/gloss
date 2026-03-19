@@ -45,11 +45,11 @@ export function buildHtmlPage(params: HtmlPageParams): string {
 
   // Server mode: embed page config for the client to read
   const pageConfigBlock = isServer
-    ? `<script type="application/json" id="page-config">${JSON.stringify({
+    ? `<script type="application/json" id="page-config">${safeForScript(JSON.stringify({
         sessionId: params.sessionId,
         wsUrl: params.wsUrl ?? "",
         mode: "server",
-      })}</script>\n`
+      }))}</script>\n`
     : "";
 
   const bodyAttrs = isServer
