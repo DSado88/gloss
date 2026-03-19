@@ -164,6 +164,50 @@ describe("discovery", () => {
       expect(sessions).toEqual([]);
     });
 
+    it("uses mtime cache on rescan, changedCount drops to zero", () => {
+      const projectDir = path.join(tempDir, "proj");
+      writeMinimalJsonl(path.join(projectDir, "cached.jsonl"), "cached");
+
+      const first = scanProjectsDir(tempDir);
+      expect(first.sessions).toHaveLength(1);
+      expect(first.changedCount).toBe(1);
+
+      const second = scanProjectsDir(tempDir);
+      expect(second.sessions).toHaveLength(1);
+      expect(second.sessions[0].id).toBe("cached");
+      expect(second.changedCount).toBe(0); // served from cache
+    });
+
+    it("cleans cache entries when files are deleted between scans", () => {
+      const projectDir = path.join(tempDir, "proj");
+      const filePath = path.join(projectDir, "ephemeral.jsonl");
+      writeMinimalJsonl(filePath, "ephemeral");
+
+      const first = scanProjectsDir(tempDir);
+      expect(first.sessions).toHaveLength(1);
+
+      fs.unlinkSync(filePath);
+
+      const second = scanProjectsDir(tempDir);
+      expect(second.sessions).toHaveLength(0);
+      expect(second.changedCount).toBe(1); // deletion counts as change
+    });
+
+    it("handles non-conversation JSONL files gracefully (filename fallback)", () => {
+      const projectDir = path.join(tempDir, "proj");
+      fs.mkdirSync(projectDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(projectDir, "random-data.jsonl"),
+        '{"event":"click","time":123}\n{"event":"scroll","time":456}\n',
+      );
+
+      const { sessions } = scanProjectsDir(tempDir);
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].id).toBe("random-data"); // filename fallback
+      expect(sessions[0].projectDir).toBeUndefined();
+      expect(sessions[0].model).toBeUndefined();
+    });
+
     it("does not read entire large files", () => {
       const projectDir = path.join(tempDir, "-Users-test-project1");
       fs.mkdirSync(projectDir, { recursive: true });
