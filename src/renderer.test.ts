@@ -476,4 +476,33 @@ describe("renderTurn", () => {
     // Should not have index 2 for text blocks
     expect(html).not.toContain('data-block-index="2"');
   });
+
+  it("shows date divider when date changes from previous turn", () => {
+    const turn: Turn = {
+      role: "user",
+      timestamp: "2024-03-16T08:00:00Z",
+      blocks: [{ type: "text", text: "Good morning" }],
+    };
+    const { html } = renderTurn(turn, 1, true, true, "2024-03-15T22:00:00Z");
+    expect(html).toContain("date-divider");
+  });
+
+  it("omits date divider when date is same as previous turn", () => {
+    const turn: Turn = {
+      role: "assistant",
+      timestamp: "2024-03-15T22:30:00Z",
+      blocks: [{ type: "text", text: "Hello" }],
+    };
+    const { html } = renderTurn(turn, 1, true, true, "2024-03-15T22:00:00Z");
+    expect(html).not.toContain("date-divider");
+  });
+
+  it("omits date divider when timestamp is missing", () => {
+    const turn: Turn = {
+      role: "user",
+      blocks: [{ type: "text", text: "No timestamp" }],
+    };
+    const { html } = renderTurn(turn, 0, true, true);
+    expect(html).not.toContain("date-divider");
+  });
 });

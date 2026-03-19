@@ -115,9 +115,13 @@ function processFileChanges(
   if (currentSize <= state.byteOffset) return;
 
   const fd = fs.openSync(state.path, "r");
-  const newBytes = Buffer.alloc(currentSize - state.byteOffset);
-  fs.readSync(fd, newBytes, 0, newBytes.length, state.byteOffset);
-  fs.closeSync(fd);
+  let newBytes: Buffer;
+  try {
+    newBytes = Buffer.alloc(currentSize - state.byteOffset);
+    fs.readSync(fd, newBytes, 0, newBytes.length, state.byteOffset);
+  } finally {
+    fs.closeSync(fd);
+  }
   state.byteOffset = currentSize;
 
   const newText = state.partialLine + newBytes.toString("utf-8");
