@@ -154,6 +154,20 @@ describe("discovery", () => {
       expect(sessions[0].model).toBe("claude-opus-4-6");
     });
 
+    it("follows symlinked project directories", () => {
+      // Create a real directory outside tempDir, symlink it in
+      const externalDir = fs.mkdtempSync(path.join(os.tmpdir(), "convo-discovery-ext-"));
+      try {
+        writeMinimalJsonl(path.join(externalDir, "sym-test.jsonl"), "sym-test");
+        fs.symlinkSync(externalDir, path.join(tempDir, "linked-project"));
+
+        const { sessions } = scanProjectsDir(tempDir);
+        expect(sessions.some((s) => s.id === "sym-test")).toBe(true);
+      } finally {
+        fs.rmSync(externalDir, { recursive: true, force: true });
+      }
+    });
+
     it("handles empty directory gracefully", () => {
       const { sessions } = scanProjectsDir(tempDir);
       expect(sessions).toEqual([]);

@@ -41,10 +41,22 @@ function findJsonlFiles(dir: string): string[] {
   }
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
+    // Follow symlinks: check the target type via statSync
+    let isDir = entry.isDirectory();
+    let isFile = entry.isFile();
+    if (entry.isSymbolicLink()) {
+      try {
+        const stat = fs.statSync(fullPath); // follows symlinks
+        isDir = stat.isDirectory();
+        isFile = stat.isFile();
+      } catch {
+        continue; // dangling symlink — skip
+      }
+    }
+    if (isDir) {
       if (entry.name === "subagents") continue;
       results.push(...findJsonlFiles(fullPath));
-    } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+    } else if (isFile && entry.name.endsWith(".jsonl")) {
       results.push(fullPath);
     }
   }
