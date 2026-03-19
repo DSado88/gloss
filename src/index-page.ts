@@ -715,8 +715,8 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
   <div id="content"></div>
 
 <script>
-const ALL = ${sessionsJson};
-const SETTINGS = ${JSON.stringify(cfg)};
+const ALL = ${sessionsJson.replace(/<\//g, "<\\/")};
+const SETTINGS = ${JSON.stringify(cfg).replace(/<\//g, "<\\/")};
 let grouped = false;
 let query = '';
 let showCount = 80;

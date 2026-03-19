@@ -6,8 +6,10 @@ import {
   shortenModel,
   formatIndexTime,
   buildIndexPage,
+  buildServerIndex,
   updateIndex,
 } from "./index-page.js";
+import type { SessionRecord } from "./db.js";
 
 describe("shortenModel", () => {
   it("strips claude- prefix and date suffix", () => {
@@ -65,6 +67,25 @@ describe("buildIndexPage", () => {
     const html = buildIndexPage("", 0);
     expect(html).toContain("@media (max-width: 700px)");
     expect(html).toContain("prefers-color-scheme: light");
+  });
+});
+
+describe("buildServerIndex", () => {
+  it("does not embed raw </ in inline script JSON (prevents XSS via </script>)", () => {
+    const sessions: SessionRecord[] = [{
+      id: "xss-test",
+      title: '</script><img src=x onerror=alert(1)>',
+      project: "/home/user/project",
+      model: "claude-3",
+      start_time: 1710000000,
+      turn_count: 5,
+    }];
+    const html = buildServerIndex(sessions);
+    // Find the JSON embedded after "const ALL ="
+    const allMatch = html.match(/const ALL = (.*?);[\r\n]/s);
+    expect(allMatch).not.toBeNull();
+    // The JSON must not contain </ which could close the script tag
+    expect(allMatch![1]).not.toContain("</");
   });
 });
 
