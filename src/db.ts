@@ -523,7 +523,7 @@ export class ConvoDb {
         }
 
         const rawTs = ann.timestamp ?? ann.created;
-        const createdAt = rawTs ? Math.floor(rawTs / 1000) : null;
+        const createdAt = rawTs != null ? Math.floor(rawTs / 1000) : null;
 
         this.upsertAnnotation({
           id: ann.id,
@@ -568,7 +568,7 @@ export class ConvoDb {
       speaker: a.speaker ?? undefined,
       role: a.speaker ?? undefined,
       tags: a.tags.length ? a.tags : undefined,
-      timestamp: a.created_at ? a.created_at * 1000 : undefined,
+      timestamp: a.created_at != null ? a.created_at * 1000 : undefined,
     }));
   }
 

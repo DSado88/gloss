@@ -534,6 +534,28 @@ describe("ConvoDb", () => {
       expect(ann.tags).toEqual([]);
     });
 
+    it("preserves timestamp 0 (epoch) without treating it as missing", () => {
+      const epochAnnotation: SidecarAnnotation[] = [
+        {
+          id: "ann-epoch",
+          turnIndex: 0,
+          charStart: 0,
+          charEnd: 5,
+          text: "epoch",
+          timestamp: 0, // 0ms = Unix epoch — valid, not "missing"
+        },
+      ];
+      db.importAnnotationsJson("sess-001", epochAnnotation);
+      const ann = db.getAnnotation("ann-epoch")!;
+      // timestamp 0ms → created_at 0s (epoch). Should NOT be null.
+      expect(ann.created_at).toBe(0);
+
+      // Round-trip: export should preserve the 0 timestamp
+      const exported = db.exportSessionAnnotations("sess-001");
+      const exp = exported.find((e) => e.id === "ann-epoch")!;
+      expect(exp.timestamp).toBe(0); // 0s → 0ms
+    });
+
     it("handles missing optional fields with defaults", () => {
       const minimal: SidecarAnnotation[] = [
         {
