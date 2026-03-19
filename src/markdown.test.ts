@@ -147,6 +147,16 @@ describe("renderMarkdownInline", () => {
     expect(html).toContain('const fence = &quot;```&quot;;');
   });
 
+  it("treats unclosed fenced code block as regular text", () => {
+    const md = "```js\nconst x = 1;\nmore text here";
+    const html = renderMarkdownInline(md);
+    // No closing ``` — entire content should be treated as regular text, not a code block
+    expect(html).not.toContain("<pre>");
+    // The content should still appear in the output (not swallowed)
+    expect(html).toContain("const x = 1;");
+    expect(html).toContain("more text here");
+  });
+
   it("does NOT process markdown inside code blocks", () => {
     const md = "```\n**bold** and *italic*\n```";
     const html = renderMarkdownInline(md);
