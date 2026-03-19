@@ -107,7 +107,8 @@ export class IncrementalParser {
           const blockType = (block.type as string) ?? "";
 
           if (blockType === "text") {
-            const text = (block.text as string) ?? "";
+            const rawText = block.text;
+            const text = typeof rawText === "string" ? rawText : rawText != null ? String(rawText) : "";
             if (text.trim()) {
               if (msgType === "user") {
                 if (isSystemNoise(text)) {
@@ -137,7 +138,8 @@ export class IncrementalParser {
               }
             }
           } else if (blockType === "thinking") {
-            const thinking = (block.thinking as string) ?? "";
+            const rawThinking = block.thinking;
+            const thinking = typeof rawThinking === "string" ? rawThinking : rawThinking != null ? String(rawThinking) : "";
             if (thinking.trim()) {
               parsedBlocks.push({ type: "thinking", text: thinking });
             }

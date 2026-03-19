@@ -561,6 +561,46 @@ describe("buildConversation", () => {
     expect(conv.turns[0].blocks[0]).toEqual({ type: "text", text: "Real message" });
   });
 
+  it("handles thinking blocks with non-string thinking field (e.g. number)", () => {
+    const file = createJsonl([
+      {
+        type: "assistant",
+        message: {
+          content: [
+            { type: "thinking", thinking: 42 },
+            { type: "text", text: "My answer" },
+          ],
+        },
+        timestamp: "t1",
+      },
+    ]);
+    // Should not crash — non-string thinking fields should be coerced or skipped
+    const conv = buildConversation(file);
+    expect(conv.turns).toHaveLength(1);
+    // The text block should still be present
+    const textBlocks = conv.turns[0].blocks.filter(b => b.type === "text");
+    expect(textBlocks).toHaveLength(1);
+  });
+
+  it("handles text blocks with non-string text field (e.g. number)", () => {
+    const file = createJsonl([
+      {
+        type: "assistant",
+        message: {
+          content: [
+            { type: "text", text: 123 },
+            { type: "text", text: "Real text" },
+          ],
+        },
+        timestamp: "t1",
+      },
+    ]);
+    const conv = buildConversation(file);
+    expect(conv.turns).toHaveLength(1);
+    const textBlocks = conv.turns[0].blocks.filter(b => b.type === "text");
+    expect(textBlocks.length).toBeGreaterThanOrEqual(1);
+  });
+
   it("cleans user text removing system noise tags but keeping real content", () => {
     const file = createJsonl([
       {
