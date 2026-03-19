@@ -501,6 +501,47 @@ describe("buildConversation", () => {
     }
   });
 
+  it("detects slash commands in array-format user content", () => {
+    const file = createJsonl([
+      {
+        type: "user",
+        message: {
+          content: [
+            { type: "text", text: "<command-name>/review</command-name><command-args>PR #42</command-args>" },
+          ],
+        },
+        timestamp: "t1",
+      },
+    ]);
+    const conv = buildConversation(file);
+    expect(conv.turns[0].blocks).toHaveLength(1);
+    expect(conv.turns[0].blocks[0]).toEqual({
+      type: "slash_command",
+      command: "/review PR #42",
+    });
+  });
+
+  it("detects session continuation in array-format user content", () => {
+    const file = createJsonl([
+      {
+        type: "user",
+        message: {
+          content: [
+            { type: "text", text: "This session is being continued from a previous conversation. Here is the summary..." },
+            { type: "text", text: "<system-reminder>some reminder</system-reminder>" },
+          ],
+        },
+        timestamp: "t1",
+      },
+    ]);
+    const conv = buildConversation(file);
+    expect(conv.turns[0].blocks).toHaveLength(1);
+    expect(conv.turns[0].blocks[0]).toEqual({
+      type: "session_continuation",
+      text: "This session is being continued from a previous conversation. Here is the summary...",
+    });
+  });
+
   it("cleans user text removing system noise tags but keeping real content", () => {
     const file = createJsonl([
       {

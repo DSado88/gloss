@@ -108,7 +108,22 @@ export class IncrementalParser {
             const text = (block.text as string) ?? "";
             if (text.trim()) {
               if (msgType === "user") {
-                if (isSystemNoise(text)) continue;
+                if (isSystemNoise(text)) {
+                  // Mirror the string-content path: detect slash commands and session continuations inside noise
+                  const cmdMatch = text.match(/<command-name>\s*(\/[\w-]+)\s*<\/command-name>/);
+                  if (cmdMatch) {
+                    const cmdArgsMatch = text.match(/<command-args>\s*([\s\S]*?)\s*<\/command-args>/);
+                    const cmd = cmdMatch[1];
+                    const args = cmdArgsMatch ? cmdArgsMatch[1].trim() : "";
+                    const label = args ? `${cmd} ${args}`.trim() : cmd;
+                    parsedBlocks.push({ type: "slash_command", command: label });
+                    hasUserText = true;
+                  } else if (text.trim().startsWith("This session is being continued")) {
+                    parsedBlocks.push({ type: "session_continuation", text: text.trim() });
+                    hasUserText = true;
+                  }
+                  continue;
+                }
                 const cleaned = cleanUserText(text);
                 if (cleaned) {
                   hasUserText = true;
