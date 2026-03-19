@@ -498,6 +498,52 @@ describe("server routes", () => {
   });
 
   // -----------------------------------------------------------------------
+  // Title + Hidden API
+  // -----------------------------------------------------------------------
+
+  it("PATCH /api/sessions/:id/title sets and clears title", async () => {
+    // Set title
+    const setRes = await fetch(`${baseUrl}/api/sessions/${SESSION_ID}/title`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "My Session Name" }),
+    });
+    expect(setRes.status).toBe(200);
+
+    // Verify it was set
+    const session1 = db.getSession(SESSION_ID);
+    expect(session1!.title).toBe("My Session Name");
+
+    // Clear title with empty string
+    await fetch(`${baseUrl}/api/sessions/${SESSION_ID}/title`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "" }),
+    });
+    const session2 = db.getSession(SESSION_ID);
+    expect(session2!.title).toBeNull();
+  });
+
+  it("PATCH /api/sessions/:id/hidden toggles hidden flag", async () => {
+    // Hide
+    const hideRes = await fetch(`${baseUrl}/api/sessions/${SESSION_ID}/hidden`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hidden: true }),
+    });
+    expect(hideRes.status).toBe(200);
+    expect(db.getSession(SESSION_ID)!.hidden).toBe(1);
+
+    // Unhide
+    await fetch(`${baseUrl}/api/sessions/${SESSION_ID}/hidden`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hidden: false }),
+    });
+    expect(db.getSession(SESSION_ID)!.hidden).toBe(0);
+  });
+
+  // -----------------------------------------------------------------------
   // API 404s
   // -----------------------------------------------------------------------
 
