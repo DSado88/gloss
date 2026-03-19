@@ -200,6 +200,20 @@ describe("renderMarkdownInline", () => {
     expect(html).toContain("<strong>bold</strong>");
   });
 
+  it("renders ***bold italic*** as nested strong+em", () => {
+    const html = renderMarkdownInline("***bold italic***");
+    expect(html).toContain("<strong>");
+    expect(html).toContain("<em>");
+    expect(html).toContain("bold italic");
+  });
+
+  it("renders bold formatting inside markdown link text", () => {
+    const html = renderMarkdownInline("[**bold link**](https://example.com)");
+    expect(html).toContain("<a ");
+    expect(html).toContain("<strong>bold link</strong>");
+    expect(html).toContain("https://example.com");
+  });
+
   // --- Italic ---
 
   it("renders italic with *", () => {
