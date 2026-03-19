@@ -723,6 +723,15 @@ async function handleApiRouteInner(
     if (!session?.jsonl_path || !fs.existsSync(session.jsonl_path)) {
       return new Response("Not found", { status: 404 });
     }
+    // Guard against OOM — same limit as renderConversationPage
+    try {
+      const stat = fs.statSync(session.jsonl_path);
+      if (stat.size > 300 * 1024 * 1024) {
+        return new Response(JSON.stringify({ error: "Session too large" }), { status: 413, headers: jsonHeaders });
+      }
+    } catch {
+      return new Response(JSON.stringify({ error: "Could not stat file" }), { status: 500, headers: jsonHeaders });
+    }
     const parser = new IncrementalParser();
     parser.feedLines(fs.readFileSync(session.jsonl_path, "utf-8").split("\n"));
     const convoData = parser.getTurns().map((turn) => ({

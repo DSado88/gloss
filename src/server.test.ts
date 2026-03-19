@@ -419,6 +419,25 @@ describe("server routes", () => {
   });
 
   // -----------------------------------------------------------------------
+  // Session data API
+  // -----------------------------------------------------------------------
+
+  it("GET /api/sessions/:id/data returns conversation turns", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions/${SESSION_ID}/data`);
+    expect(res.status).toBe(200);
+    const data = await res.json() as any[];
+    expect(Array.isArray(data)).toBe(true);
+    expect(data.length).toBeGreaterThan(0);
+    expect(data[0]).toHaveProperty("role");
+    expect(data[0]).toHaveProperty("text");
+  });
+
+  it("GET /api/sessions/:id/data returns 404 for nonexistent session", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions/nonexistent-xyz/data`);
+    expect(res.status).toBe(404);
+  });
+
+  // -----------------------------------------------------------------------
   // API 404s
   // -----------------------------------------------------------------------
 
