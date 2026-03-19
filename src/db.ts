@@ -583,9 +583,6 @@ export class ConvoDb {
 
   /** Index a session's turns into FTS. Replaces any existing index for the session. */
   indexSession(sessionId: string, turns: { role: string; text: string }[], fileMtime: number): void {
-    // Remove old index for this session
-    this.removeFtsIndex(sessionId);
-
     const insertMap = this.db.prepare(
       "INSERT INTO fts_map (session_id, turn_index, role) VALUES (?, ?, ?)",
     );
@@ -598,6 +595,8 @@ export class ConvoDb {
 
     this.db.exec("BEGIN");
     try {
+      // Remove old index inside the transaction so ROLLBACK restores it on failure
+      this.removeFtsIndex(sessionId);
       for (let i = 0; i < turns.length; i++) {
         const text = turns[i].text.trim();
         if (!text) continue;

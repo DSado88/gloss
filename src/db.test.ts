@@ -728,6 +728,25 @@ describe("ConvoDb", () => {
       expect(ghosts.length).toBe(0);
     });
 
+    it("preserves FTS index atomically if re-indexing fails midway", () => {
+      db.upsertSession({ id: "atomic-test" });
+      db.indexSession("atomic-test", [{ role: "user", text: "important searchable text" }], 100);
+
+      // Verify searchable
+      expect(db.searchSessions("important", 10).length).toBe(1);
+
+      // Re-index with bad data that crashes mid-transaction (null text → TypeError on .trim())
+      try {
+        db.indexSession("atomic-test", [{ role: "user", text: null as any }], 200);
+      } catch {
+        // Expected to throw
+      }
+
+      // The original index should still work — removeFtsIndex must be inside the transaction
+      // so ROLLBACK restores it. Before the fix, the old index was already deleted.
+      expect(db.searchSessions("important", 10).length).toBe(1);
+    });
+
     it("re-indexing does not accumulate ghost tokens", () => {
       db.upsertSession({ id: "reindex-ghost" });
 
