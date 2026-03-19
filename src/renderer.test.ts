@@ -477,6 +477,24 @@ describe("renderTurn", () => {
     expect(html).not.toContain('data-block-index="2"');
   });
 
+  it("renders turn with only tool blocks and produces empty TOC preview", () => {
+    const turn: Turn = {
+      role: "assistant",
+      timestamp: "2024-03-15T10:00:00Z",
+      blocks: [
+        { type: "tool_use", name: "Read", input: { file_path: "/src/app.ts" } },
+        { type: "tool_result", content: "file contents here" },
+      ],
+    };
+    const { html, tocEntry } = renderTurn(turn, 5, true, true);
+    // Turn should render (tool blocks are visible)
+    expect(html).toContain("tool-use");
+    expect(html).toContain("tool-result");
+    // TOC preview should be empty (no text blocks to extract preview from)
+    expect(tocEntry).not.toBeNull();
+    expect(tocEntry!.preview).toBe("");
+  });
+
   it("shows date divider when date changes from previous turn", () => {
     const turn: Turn = {
       role: "user",
