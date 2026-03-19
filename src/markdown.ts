@@ -155,8 +155,13 @@ function applyInlineFormatting(text: string): string {
   p = p.replace(/__(.+?)__/g, "<strong>$1</strong>");
   p = p.replace(/(?<!\w)_([^_]+?)_(?!\w)/g, "<em>$1</em>");
 
-  // Links [text](url)
-  p = p.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+  // Links [text](url) — reject dangerous URI schemes
+  p = p.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text: string, url: string) => {
+    if (/^\s*(javascript|data|vbscript):/i.test(url)) {
+      return `${text}`;
+    }
+    return `<a href="${url}">${text}</a>`;
+  });
 
   // Auto-link URLs and file paths
   p = applyAutoLinks(p);

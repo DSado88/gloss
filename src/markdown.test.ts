@@ -200,6 +200,16 @@ describe("renderMarkdownInline", () => {
     expect(html).toContain('<a href="https://example.com">Click</a>');
   });
 
+  it("rejects javascript: URLs in markdown links", () => {
+    const html = renderMarkdownInline("[click me](javascript:alert(1))");
+    expect(html).not.toContain('href="javascript:');
+  });
+
+  it("rejects data: URLs in markdown links", () => {
+    const html = renderMarkdownInline("[click](data:text/html,<script>alert(1)</script>)");
+    expect(html).not.toContain('href="data:');
+  });
+
   // --- Auto-linking URLs ---
 
   it("auto-links bare URLs", () => {
