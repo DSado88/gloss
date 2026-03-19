@@ -257,7 +257,7 @@ export function updateIndex(viewerDir: string): void {
       const filename = meta._filename;
 
       return (
-        `<a class="index-entry" href="${filename}">` +
+        `<a class="index-entry" href="${escapeHtml(filename)}">` +
         `<span class="entry-id">${shortId}</span>` +
         `<span class="entry-project" title="${escapeHtml(project)}">${escapeHtml(projectDisplay)}</span>` +
         `<span class="entry-model">${escapeHtml(modelDisplay)}</span>` +

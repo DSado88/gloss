@@ -178,6 +178,34 @@ describe("updateIndex", () => {
     expect(content).toContain("3-haiku");
   });
 
+  it("escapes special chars in filenames for href attributes", () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "convo-test-"));
+
+    const meta = JSON.stringify({
+      session_id: "inject-test",
+      short_id: "inject",
+      project_dir: "/tmp",
+      model: "claude-3",
+      start_time: "2024-01-01T12:00:00Z",
+      turn_count: 1,
+      user_turns: 1,
+    });
+
+    // File with " in name that could break the href attribute and inject handlers
+    const evilName = 'test" onmouseover="alert(1).html';
+    fs.writeFileSync(
+      path.join(tmpDir, evilName),
+      `<!-- CONVO_META:${meta} -->\n<html></html>`,
+    );
+
+    updateIndex(tmpDir);
+
+    const content = fs.readFileSync(path.join(tmpDir, "index.html"), "utf-8");
+    // The " in the filename must be &quot; — no attribute injection possible
+    // Check that the real " doesn't appear as an attribute delimiter
+    expect(content).not.toContain('onmouseover="alert');
+  });
+
   it("produces empty-state when no conversation files exist", () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "convo-test-"));
 
