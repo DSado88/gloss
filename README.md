@@ -1,16 +1,18 @@
 # Gloss
 
-A conversation viewer and annotation tool for Claude Code sessions. Browse, search, highlight, and export from any conversation — live or historical.
+Persistent memory and recall for Claude Code. Every conversation compounds.
 
 ## Why
 
-As conversations go on for hundreds of turns, it's easy to forget how they started. Context compaction erases detail, memory fades, and scrolling back to find that one thing Claude said is impractical.
+Claude throws 40 things at you and there's no way to respond bullet by bullet. You can't highlight the 3 that matter, push back on the 1 you disagree with, and ignore the rest — not in a terminal. And when context compaction kicks in, the good stuff vanishes. Next turn, Claude doesn't remember what it said. Next session, you don't remember which conversation it happened in.
 
-On top of that, LLMs are constantly producing high-quality framing, synthesis, and articulation — but it's all trapped in the conversation it was generated in. Unless you copy and paste it somewhere, after a few days or weeks it's hard to remember which conversation something happened in, and harder still to find the specific moments that stuck out.
+Gloss fixes both problems. It gives you the full uncompacted record of every Claude Code session across every project, with tools to **curate** (highlight, comment, tag) and **recall** (semantic search, MCP tools) — so the knowledge compounds instead of evaporating.
 
-Gloss solves this by letting you scrub through the full uncompacted record, highlight the moments that matter, and export them back into Claude Code. It's capture infrastructure for long-running AI sessions — making sure the good stuff doesn't evaporate.
+**Highlights are a response mechanism.** Select the parts that matter, annotate the parts you disagree with, tag decisions as settled. Those curated signals feed back into Claude as structured context — not next session, but *this* session, via the MCP server.
 
-The core loop: **converse > review > annotate > extract > feed forward**.
+**Semantic search is cross-project recall.** Ask "what did we decide about the DuckDB architecture?" and Gloss searches 12,000+ conversations using hybrid FTS + vector embeddings. Claude finds the answer itself, mid-conversation, without you copy-pasting from old sessions.
+
+The core loop: **Claude generates → you curate in Gloss → curation feeds back to Claude → Claude generates better.** Every conversation makes every future conversation — and the current one — smarter.
 
 ## Quick Start
 
