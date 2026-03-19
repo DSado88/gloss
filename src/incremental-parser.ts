@@ -59,7 +59,8 @@ export class IncrementalParser {
       if (msgType !== "user" && msgType !== "assistant") continue;
 
       const content = (message.content as string | unknown[] | undefined) ?? "";
-      const timestamp = (obj.timestamp as string) ?? "";
+      const rawTs = obj.timestamp;
+      const timestamp = typeof rawTs === "string" ? rawTs : rawTs != null ? String(rawTs) : "";
 
       if (!this.startTime && timestamp) {
         this.startTime = timestamp;

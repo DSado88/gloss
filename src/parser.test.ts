@@ -596,6 +596,21 @@ describe("buildConversation", () => {
     expect(conv.turns[0].blocks[0]).toEqual({ type: "text", text: "Real message" });
   });
 
+  it("coerces non-string timestamp to string (prevents silent data loss)", () => {
+    const file = createJsonl([
+      { type: "user", message: { content: "Hi" }, timestamp: 1710000000 },
+      { type: "assistant", message: { content: "Hello" }, timestamp: 1710000005 },
+    ]);
+    const conv = buildConversation(file);
+    expect(conv.turns).toHaveLength(2);
+    // Timestamp should be a string, not a number
+    expect(typeof conv.turns[0].timestamp).toBe("string");
+    expect(conv.turns[0].timestamp).toBe("1710000000");
+    // startTime metadata should also be a string
+    expect(typeof conv.startTime).toBe("string");
+    expect(conv.startTime).toBe("1710000000");
+  });
+
   it("coerces non-string tool_use_id in tool_result to string", () => {
     const file = createJsonl([
       {
