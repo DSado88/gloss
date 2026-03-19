@@ -364,6 +364,18 @@ describe("renderMarkdownInline", () => {
     expect(html).not.toMatch(/<script[\s>]/i);
   });
 
+  // --- Security: null-byte sentinel injection ---
+
+  it("does not allow null-byte sentinel injection to bypass escaping", () => {
+    // The renderer uses \x00PRE_OPEN\x00 / \x00PRE_CLOSE\x00 as internal sentinels.
+    // If user content contains these, it must NOT bypass HTML escaping.
+    const PRE_OPEN = "\x00PRE_OPEN\x00";
+    const PRE_CLOSE = "\x00PRE_CLOSE\x00";
+    const malicious = `text ${PRE_OPEN}<code><img src=x onerror=alert(1)></code>${PRE_CLOSE} more`;
+    const html = renderMarkdownInline(malicious);
+    expect(html).not.toContain("<img");
+  });
+
   // --- Security: HTML escaping in main text (mut-018) ---
 
   it("escapes raw HTML in regular text", () => {
