@@ -32,7 +32,9 @@ export class IncrementalParser {
 
       let obj: Record<string, unknown>;
       try {
-        obj = JSON.parse(line);
+        const parsed = JSON.parse(line);
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) continue;
+        obj = parsed;
       } catch {
         continue;
       }

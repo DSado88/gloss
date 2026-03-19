@@ -542,6 +542,25 @@ describe("buildConversation", () => {
     });
   });
 
+  it("survives JSONL lines that parse as non-object JSON values (null, true, 42)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "parser-test-"));
+    const file = join(dir, "json-primitives.jsonl");
+    const content = [
+      "null",
+      "true",
+      "42",
+      '"just a string"',
+      "[1, 2, 3]",
+      JSON.stringify({ type: "user", message: { content: "Real message" }, timestamp: "t1" }),
+    ].join("\n");
+    writeFileSync(file, content);
+    tempFiles.push(file);
+
+    const conv = buildConversation(file);
+    expect(conv.turns).toHaveLength(1);
+    expect(conv.turns[0].blocks[0]).toEqual({ type: "text", text: "Real message" });
+  });
+
   it("cleans user text removing system noise tags but keeping real content", () => {
     const file = createJsonl([
       {
