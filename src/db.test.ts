@@ -130,6 +130,22 @@ describe("ConvoDb", () => {
       // OFFSET without LIMIT is a SQLite syntax error — should be handled gracefully
       expect(() => db.listSessions({ offset: 1 })).not.toThrow();
     });
+
+    it("listSessions filters hidden sessions by default", () => {
+      db.upsertSession({ id: "visible" });
+      db.upsertSession({ id: "hidden-one" });
+      db.db.run("UPDATE sessions SET hidden = 1 WHERE id = ?", ["hidden-one"]);
+
+      // Default: hidden sessions excluded
+      const visible = db.listSessions();
+      expect(visible.map((s) => s.id)).toContain("visible");
+      expect(visible.map((s) => s.id)).not.toContain("hidden-one");
+
+      // With includeHidden: true — all sessions returned
+      const all = db.listSessions({ includeHidden: true });
+      expect(all.map((s) => s.id)).toContain("visible");
+      expect(all.map((s) => s.id)).toContain("hidden-one");
+    });
   });
 
   // -----------------------------------------------------------------------
