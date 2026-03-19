@@ -705,6 +705,25 @@ describe("ConvoDb", () => {
   });
 
   // -----------------------------------------------------------------------
+  // FTS: empty query edge case
+  // -----------------------------------------------------------------------
+
+  describe("FTS empty query", () => {
+    it("searchSessions with empty string returns empty results instead of crashing", () => {
+      // FTS5 MATCH '' throws "syntax error near ''" — searchSessions should guard against this
+      expect(() => db.searchSessions("", 10)).not.toThrow();
+      const results = db.searchSessions("", 10);
+      expect(results).toEqual([]);
+    });
+
+    it("searchConversations with empty string returns empty results instead of crashing", () => {
+      expect(() => db.searchConversations("", 10)).not.toThrow();
+      const results = db.searchConversations("", 10);
+      expect(results).toEqual([]);
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Bug #5: FTS ghost entries via broken contentless delete
   // -----------------------------------------------------------------------
 

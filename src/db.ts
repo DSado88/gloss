@@ -630,6 +630,7 @@ export class ConvoDb {
     role: string;
     rank: number;
   }> {
+    if (!query.trim()) return [];
     // FTS5 query — wrap in double quotes for phrase, or pass as-is for boolean
     const rows = this.db.query(`
       SELECT m.session_id, m.turn_index, m.role, f.rank
@@ -653,6 +654,7 @@ export class ConvoDb {
     match_count: number;
     best_rank: number;
   }> {
+    if (!query.trim()) return [];
     const rows = this.db.query(`
       SELECT m.session_id, COUNT(*) as match_count, MIN(f.rank) as best_rank
       FROM conversation_fts f
