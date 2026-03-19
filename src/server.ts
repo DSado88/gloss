@@ -729,7 +729,7 @@ async function handleApiRouteInner(
     return new Response(JSON.stringify({ ok: true }), { headers: jsonHeaders });
   }
 
-  // GET /api/sessions/:id/data
+  // GET /api/sessions/:id/data?start=N&end=N
   const dataMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/data$/);
   if (dataMatch && req.method === "GET") {
     const sessionId = dataMatch[1];
@@ -741,21 +741,32 @@ async function handleApiRouteInner(
     try {
       const stat = fs.statSync(session.jsonl_path);
       if (stat.size > 300 * 1024 * 1024) {
-        return new Response(JSON.stringify({ error: "Session too large" }), { status: 413, headers: jsonHeaders });
+        return new Response(JSON.stringify({ error: "Session too large — use start/end params to read a range" }), { status: 413, headers: jsonHeaders });
       }
     } catch {
       return new Response(JSON.stringify({ error: "Could not stat file" }), { status: 500, headers: jsonHeaders });
     }
     const parser = new IncrementalParser();
     parser.feedLines(fs.readFileSync(session.jsonl_path, "utf-8").split("\n"));
-    const convoData = parser.getTurns().map((turn) => ({
+    const allTurns = parser.getTurns();
+
+    // Optional server-side range slicing — avoids sending full transcript over HTTP
+    const url = new URL(req.url);
+    const startParam = url.searchParams.get("start");
+    const endParam = url.searchParams.get("end");
+    const start = startParam != null ? Math.max(0, parseInt(startParam, 10)) : 0;
+    const end = endParam != null ? Math.min(parseInt(endParam, 10), allTurns.length - 1) : allTurns.length - 1;
+    const slice = allTurns.slice(start, end + 1);
+
+    const convoData = slice.map((turn) => ({
       role: turn.role,
       timestamp: turn.timestamp || "",
       text: turn.blocks
         .filter((b): b is TextBlock => b.type === "text")
         .map((b) => b.text || ""),
     }));
-    return new Response(JSON.stringify(convoData), { headers: jsonHeaders });
+    const meta = { totalTurns: allTurns.length, start, end: Math.min(end, allTurns.length - 1) };
+    return new Response(JSON.stringify({ turns: convoData, ...meta }), { headers: jsonHeaders });
   }
 
   // POST /api/search-sources — retrieval only (no LLM synthesis)
@@ -943,14 +954,16 @@ async function handleApiRouteInner(
     const url = new URL(req.url);
     const project = url.searchParams.get("project") ?? undefined;
     const limit = parseInt(url.searchParams.get("limit") ?? "20", 10);
-    let sessions = db.listSessions({ limit: Math.min(limit, 200) });
+    // When filtering by project, fetch more rows then filter — avoids
+    // LIMIT cutting off matches that appear later in the sort order.
+    let allSessions = db.listSessions(project ? {} : { limit: Math.min(limit, 200) });
     if (project) {
       const q = project.toLowerCase();
-      sessions = sessions.filter((s) =>
-        (s.project ?? "").toLowerCase().includes(q),
-      );
+      allSessions = allSessions
+        .filter((s) => (s.project ?? "").toLowerCase().includes(q))
+        .slice(0, Math.min(limit, 200));
     }
-    const out = sessions.map((s) => ({
+    const out = allSessions.map((s) => ({
       id: s.id,
       project: s.project ?? "",
       title: s.title ?? "",
@@ -963,6 +976,7 @@ async function handleApiRouteInner(
   }
 
   // GET /api/highlights?q=...&session=...&tag=...&days=...&limit=...
+  // Filters compose: tag narrows by tag, q searches text, session scopes, days limits recency.
   if (pathname === "/api/highlights" && req.method === "GET") {
     const url = new URL(req.url);
     const q = url.searchParams.get("q") ?? "";
@@ -971,19 +985,31 @@ async function handleApiRouteInner(
     const days = parseInt(url.searchParams.get("days") ?? "0", 10);
     const limit = Math.min(parseInt(url.searchParams.get("limit") ?? "30", 10), 200);
 
+    // Start with the broadest applicable query, then filter in memory
     let results;
-    if (tag) {
-      results = db.getAnnotationsByTag(tag, { limit });
-    } else if (q) {
-      results = db.searchAnnotations(q, { sessionId, limit });
-    } else if (days > 0) {
-      results = db.getRecentAnnotations({ days, limit });
+    if (q) {
+      // FTS search supports session filter natively
+      results = db.searchAnnotations(q, { sessionId, tags: tag ? [tag] : undefined, limit: limit * 3 });
+    } else if (tag) {
+      results = db.getAnnotationsByTag(tag, { limit: limit * 3 });
     } else if (sessionId) {
       results = db.getSessionAnnotations(sessionId);
     } else {
-      results = db.getRecentAnnotations({ days: 30, limit });
+      results = db.getRecentAnnotations({ days: days > 0 ? days : 30, limit: limit * 3 });
     }
-    return new Response(JSON.stringify(results), { headers: jsonHeaders });
+
+    // Apply remaining filters that weren't handled by the DB query
+    if (tag && q) {
+      // searchAnnotations already handled tag
+    } else if (sessionId && (tag || days > 0)) {
+      results = results.filter((a) => a.session_id === sessionId);
+    }
+    if (days > 0 && !q) {
+      const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
+      results = results.filter((a) => (a.created_at ?? 0) >= cutoff);
+    }
+
+    return new Response(JSON.stringify(results.slice(0, limit)), { headers: jsonHeaders });
   }
 
   return new Response("Not Found", { status: 404 });

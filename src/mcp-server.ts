@@ -15,13 +15,28 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 const GLOSS_URL = process.env.GLOSS_URL ?? "http://localhost:3456";
+const FETCH_TIMEOUT_MS = 30_000;
 
 // ---------------------------------------------------------------------------
 // HTTP helpers
 // ---------------------------------------------------------------------------
 
 async function glossFetch(path: string, opts?: RequestInit): Promise<unknown> {
-  const res = await fetch(`${GLOSS_URL}${path}`, opts);
+  let res: Response;
+  try {
+    res = await fetch(`${GLOSS_URL}${path}`, {
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      ...opts,
+    });
+  } catch (e) {
+    if (e instanceof TypeError && (e.message.includes("ECONNREFUSED") || e.message.includes("fetch failed"))) {
+      throw new Error(`Gloss server is not running on ${GLOSS_URL}. Start it with: bun src/cli.ts serve`);
+    }
+    if (e instanceof DOMException && e.name === "TimeoutError") {
+      throw new Error(`Gloss server timed out after ${FETCH_TIMEOUT_MS / 1000}s`);
+    }
+    throw e;
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`Gloss API ${res.status}: ${text}`);
@@ -156,7 +171,7 @@ server.tool(
     "Use this to find past discussions, decisions, code patterns, or anything discussed in previous sessions.",
   {
     query: z.string().describe("Natural language search query"),
-    maxSources: z.number().optional().describe("Max sources to return (default 10)"),
+    maxSources: z.number().int().min(1).max(20).optional().describe("Max sources to return (default 10)"),
   },
   async (args) => {
     const data = (await glossPost("/api/search-sources", {
@@ -172,39 +187,47 @@ server.tool(
 
 // ── Tool: read_conversation ───────────────────────────────────────────────
 
+const MAX_READ_WINDOW = 30;
+
 server.tool(
   "read_conversation",
   "Read turns from a specific conversation by session ID. " +
-    "Returns the text content of each turn. Use this after search to read more context from a specific session.",
+    "Returns the text content of each turn (max 30 turns per call). " +
+    "Use this after search to read more context from a specific session.",
   {
     sessionId: z.string().describe("The session UUID"),
-    startTurn: z.number().optional().describe("First turn index to read (default 0)"),
-    endTurn: z.number().optional().describe("Last turn index to read (default: all)"),
+    startTurn: z.number().int().min(0).optional().describe("First turn index to read (default 0)"),
+    endTurn: z.number().int().min(0).optional().describe("Last turn index to read (default: startTurn + 30)"),
   },
   async (args) => {
-    const data = (await glossFetch(
-      `/api/sessions/${args.sessionId}/data`,
-    )) as Array<{ role: string; timestamp: string; text: string[] }>;
+    const id = encodeURIComponent(args.sessionId);
+    const start = args.startTurn ?? 0;
+    const end = args.endTurn ?? start + MAX_READ_WINDOW - 1;
+    // Clamp window to prevent context blowout
+    const clampedEnd = Math.min(end, start + MAX_READ_WINDOW - 1);
 
-    if (!data || data.length === 0) {
+    const data = (await glossFetch(
+      `/api/sessions/${id}/data?start=${start}&end=${clampedEnd}`,
+    )) as { turns: Array<{ role: string; timestamp: string; text: string[] }>; totalTurns: number; start: number; end: number };
+
+    if (!data.turns || data.turns.length === 0) {
       return { content: [{ type: "text" as const, text: "Session not found or empty." }] };
     }
 
-    const start = args.startTurn ?? 0;
-    const end = args.endTurn ?? data.length - 1;
-    const slice = data.slice(start, end + 1);
-
-    const lines: string[] = [`Session ${args.sessionId} — turns ${start}-${end} of ${data.length - 1}:\n`];
-    for (let i = 0; i < slice.length; i++) {
-      const t = slice[i];
+    const lines: string[] = [`Session ${args.sessionId} — turns ${data.start}-${data.end} of ${data.totalTurns - 1}:\n`];
+    for (let i = 0; i < data.turns.length; i++) {
+      const t = data.turns[i];
       const role = t.role === "user" ? "Human" : "Assistant";
       const text = t.text.join("\n");
       const truncated = text.length > 5000
         ? text.slice(0, 5000) + "\n... [truncated — use narrower turn range]"
         : text;
-      lines.push(`── Turn ${start + i} (${role}) ──`);
+      lines.push(`── Turn ${data.start + i} (${role}) ──`);
       lines.push(truncated);
       lines.push("");
+    }
+    if (data.totalTurns > clampedEnd + 1) {
+      lines.push(`[${data.totalTurns - clampedEnd - 1} more turns available — use startTurn=${clampedEnd + 1} to continue]`);
     }
     return { content: [{ type: "text" as const, text: lines.join("\n") }] };
   },
@@ -215,13 +238,14 @@ server.tool(
 server.tool(
   "get_highlights",
   "Query annotations/highlights across all conversations. " +
-    "Can filter by session, tag, or search text. Returns highlighted text, comments, tags, and kinds.",
+    "Filters compose: combine session, tag, search, and recency together. " +
+    "Returns highlighted text, comments, tags, and kinds.",
   {
     sessionId: z.string().optional().describe("Filter to a specific session UUID"),
     search: z.string().optional().describe("Full-text search within highlight text and comments"),
     tag: z.string().optional().describe("Filter by tag name"),
-    recent: z.number().optional().describe("Get highlights from the last N days (default 7)"),
-    limit: z.number().optional().describe("Max results (default 30)"),
+    recent: z.number().int().min(1).optional().describe("Only highlights from the last N days"),
+    limit: z.number().int().min(1).max(100).optional().describe("Max results (default 30)"),
   },
   async (args) => {
     const params = new URLSearchParams();
@@ -247,7 +271,7 @@ server.tool(
     "Useful for browsing what's been worked on recently or finding sessions by project.",
   {
     project: z.string().optional().describe("Filter by project name (substring match)"),
-    limit: z.number().optional().describe("Max sessions to return (default 20)"),
+    limit: z.number().int().min(1).max(100).optional().describe("Max sessions to return (default 20)"),
   },
   async (args) => {
     const params = new URLSearchParams();

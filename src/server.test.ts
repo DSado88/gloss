@@ -442,11 +442,12 @@ describe("server routes", () => {
   it("GET /api/sessions/:id/data returns conversation turns", async () => {
     const res = await fetch(`${baseUrl}/api/sessions/${SESSION_ID}/data`);
     expect(res.status).toBe(200);
-    const data = await res.json() as any[];
-    expect(Array.isArray(data)).toBe(true);
-    expect(data.length).toBeGreaterThan(0);
-    expect(data[0]).toHaveProperty("role");
-    expect(data[0]).toHaveProperty("text");
+    const data = await res.json() as any;
+    expect(Array.isArray(data.turns)).toBe(true);
+    expect(data.turns.length).toBeGreaterThan(0);
+    expect(data.turns[0]).toHaveProperty("role");
+    expect(data.turns[0]).toHaveProperty("text");
+    expect(data.totalTurns).toBeGreaterThan(0);
   });
 
   it("GET /api/sessions/:id/data returns 404 JSON for nonexistent session", async () => {
