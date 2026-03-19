@@ -207,6 +207,19 @@ describe("renderMarkdownInline", () => {
     expect(html).toContain("bold italic");
   });
 
+  it("applies inline formatting to text between fenced code blocks", () => {
+    const md = "```js\nconst x = 1;\n```\n\nHere is **bold** and `inline code`.\n\n```ts\nconst y = 2;\n```";
+    const html = renderMarkdownInline(md);
+    // Code blocks should be in <pre>
+    expect(html).toContain('<pre><code class="language-js">');
+    expect(html).toContain('<pre><code class="language-ts">');
+    // Text between should have inline formatting applied
+    expect(html).toContain("<strong>bold</strong>");
+    expect(html).toContain("<code>inline code</code>");
+    // Code inside blocks should NOT have formatting
+    expect(html).not.toContain("<strong>const</strong>");
+  });
+
   it("renders bold formatting inside markdown link text", () => {
     const html = renderMarkdownInline("[**bold link**](https://example.com)");
     expect(html).toContain("<a ");
