@@ -617,24 +617,61 @@ function toggleSelectAll() {
   buildExport();
 }
 
-function toggleExportItem(id, ev) {
-  if (ev) ev.stopPropagation();
-  // If set is empty (meaning all selected), populate it with all then remove this one
+let lastClickedExportId = null;
+
+function setExportSelected(id, selected) {
+  const ids = sortedAnnotationIds();
+  // Materialize the implicit "all selected" state
   if (exportSelected.size === 0) {
-    sortedAnnotationIds().forEach(i => exportSelected.add(i));
-    exportSelected.delete(id);
-  } else if (exportSelected.has('__none__')) {
-    exportSelected.clear();
-    exportSelected.add(id);
-  } else if (exportSelected.has(id)) {
-    exportSelected.delete(id);
-    if (exportSelected.size === 0) exportSelected.add('__none__');
-  } else {
-    exportSelected.add(id);
-    // If all are now selected, clear to "all" state
-    if (exportSelected.size === sortedAnnotationIds().length) exportSelected.clear();
+    ids.forEach(i => exportSelected.add(i));
   }
+  exportSelected.delete('__none__');
+  if (selected) {
+    exportSelected.add(id);
+  } else {
+    exportSelected.delete(id);
+  }
+  // Normalize: if all selected, clear to "all" state; if none, use sentinel
+  if (exportSelected.size === ids.length) {
+    exportSelected.clear();
+  } else if (exportSelected.size === 0) {
+    exportSelected.add('__none__');
+  }
+}
+
+function handleItemClick(id, ev) {
+  if (ev) ev.stopPropagation();
+  if (ev) ev.preventDefault();
+  const isMeta = ev && (ev.metaKey || ev.ctrlKey);
+  const isShift = ev && ev.shiftKey;
+  const ids = sortedAnnotationIds();
+
+  if (isShift && lastClickedExportId) {
+    // Range select: select everything between lastClicked and current
+    const fromIdx = ids.indexOf(lastClickedExportId);
+    const toIdx = ids.indexOf(id);
+    if (fromIdx !== -1 && toIdx !== -1) {
+      const lo = Math.min(fromIdx, toIdx);
+      const hi = Math.max(fromIdx, toIdx);
+      for (let i = lo; i <= hi; i++) {
+        setExportSelected(ids[i], true);
+      }
+    }
+  } else if (isMeta) {
+    // Cmd/Ctrl+click: toggle individual without affecting others
+    setExportSelected(id, !isExportSelected(id));
+  } else {
+    // Plain click: toggle this item + scroll
+    setExportSelected(id, !isExportSelected(id));
+    scrollToHighlight(id);
+  }
+
+  lastClickedExportId = id;
   buildExport();
+}
+
+function toggleExportItem(id, ev) {
+  handleItemClick(id, ev);
 }
 
 function selectedIds() {
@@ -688,8 +725,8 @@ function buildExport() {
     const time = ann.time ? \`<span class="hl-item-time">\${ann.time}<\\/span>\` : '';
     const kindBadge = (ann.kind && ann.kind !== 'highlight') ? \`<span class="hl-kind-badge">\${ann.kind}<\\/span>\` : '';
     const tagsHtml = (ann.tags && ann.tags.length) ? \`<div class="hl-item-tags">\${ann.tags.map(t => \`<span class="hl-tag">\${t}<\\/span>\`).join('')}<\\/div>\` : '';
-    return \`<div class="hl-item\${checked ? '' : ' hl-deselected'}" onclick="scrollToHighlight('\${id}')" onmouseenter="hoverHighlight('\${id}',true)" onmouseleave="hoverHighlight('\${id}',false)">
-      <div class="hl-item-header"><span style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="hl-checkbox" \${checked ? 'checked' : ''} onclick="toggleExportItem('\${id}',event)"><span class="hl-item-role">\${ann.role || '?'}\${kindBadge}<\\/span><\\/span><span style="display:flex;align-items:center;gap:6px">\${time}<button class="hl-delete" onclick="event.stopPropagation();removeAnnotation('\${id}')" title="Delete highlight">&times;<\\/button><\\/span><\\/div>
+    return \`<div class="hl-item\${checked ? '' : ' hl-deselected'}" onclick="handleItemClick('\${id}',event)" onmouseenter="hoverHighlight('\${id}',true)" onmouseleave="hoverHighlight('\${id}',false)">
+      <div class="hl-item-header"><span style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="hl-checkbox" \${checked ? 'checked' : ''} onclick="handleItemClick('\${id}',event)"><span class="hl-item-role">\${ann.role || '?'}\${kindBadge}<\\/span><\\/span><span style="display:flex;align-items:center;gap:6px">\${time}<button class="hl-delete" onclick="event.stopPropagation();removeAnnotation('\${id}')" title="Delete highlight">&times;<\\/button><\\/span><\\/div>
       <div class="hl-item-text">\${quote}<\\/div>
       \${comment}
       \${tagsHtml}
@@ -748,15 +785,10 @@ function escXml(s) {
 
 // Reconstruct full quote from convoData using char offsets, falling back to stored text
 function fullQuote(ann) {
-  const ti = ann.turnIndex ?? -1;
-  const bi = ann.blockIndex ?? 0;
-  if (ti >= 0 && ti < convoData.length && ann.charStart >= 0 && ann.charEnd > ann.charStart) {
-    const blockText = (convoData[ti].text || [])[bi];
-    if (blockText) {
-      const reconstructed = blockText.slice(ann.charStart, ann.charEnd);
-      if (reconstructed.length > 0) return reconstructed;
-    }
-  }
+  // ann.text is captured from the rendered DOM (range.toString()), so it's
+  // always the authoritative quote.  charStart/charEnd are DOM-relative offsets
+  // and can't be applied to the raw markdown in convoData (tables, backticks,
+  // etc. shift positions), so we don't attempt reconstruction.
   return ann.text || '';
 }
 

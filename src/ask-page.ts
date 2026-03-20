@@ -326,14 +326,53 @@ function buildStreamingJs(query: string): string {
     }
   }
 
+  // Answer cache (sessionStorage, keyed by query)
+  var CACHE_PREFIX = 'gloss-ask:';
+  function cacheKey(query) { return CACHE_PREFIX + query; }
+  function getCached(query) {
+    try {
+      var raw = sessionStorage.getItem(cacheKey(query));
+      return raw ? JSON.parse(raw) : null;
+    } catch(e) { return null; }
+  }
+  function setCache(query, sources, answer, timing) {
+    try {
+      sessionStorage.setItem(cacheKey(query), JSON.stringify({
+        sources: sources, answer: answer, timing: timing, ts: Date.now()
+      }));
+    } catch(e) { /* quota exceeded — ignore */ }
+  }
+
+  function restoreFromCache(cached) {
+    renderSources(cached.sources);
+    answerText = cached.answer;
+    updateAnswer();
+    finishAnswer();
+    if (cached.timing) showTiming(cached.timing);
+  }
+
   // Stream via NDJSON
   function doStream(query) {
+    // Check cache first (back-button, re-navigation)
+    var cached = getCached(query);
+    if (cached) {
+      answerArea.innerHTML = '';
+      sourcesArea.innerHTML = '';
+      answerText = '';
+      answerVisible = false;
+      sourceMap = {};
+      restoreFromCache(cached);
+      return;
+    }
+
     statusArea.innerHTML = '<div class="search-status"><div class="mini-spinner"></div>Searching...</div>';
     answerArea.innerHTML = '';
     sourcesArea.innerHTML = '';
     answerText = '';
     answerVisible = false;
     sourceMap = {};
+    var streamSources = null;
+    var streamTiming = null;
 
     fetch('/api/ask-stream', {
       method: 'POST',
@@ -358,6 +397,10 @@ function buildStreamingJs(query: string): string {
             if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
             updateAnswer();
             finishAnswer();
+            // Cache completed result
+            if (streamSources && answerText) {
+              setCache(query, streamSources, answerText, streamTiming);
+            }
             return;
           }
           buffer += decoder.decode(result.value, {stream: true});
@@ -374,6 +417,7 @@ function buildStreamingJs(query: string): string {
         try {
           var event = JSON.parse(line);
           if (event.type === 'sources') {
+            streamSources = event.sources;
             renderSources(event.sources);
             var searchTime = (event.timing.ftsMs || 0) + (event.timing.vectorMs || 0);
             statusArea.innerHTML = '<div class="search-status"><div class="mini-spinner"></div>Found '
@@ -383,6 +427,7 @@ function buildStreamingJs(query: string): string {
             answerText += event.text;
             scheduleRender();
           } else if (event.type === 'done') {
+            streamTiming = event.timing;
             showTiming(event.timing);
           } else if (event.type === 'error') {
             statusArea.innerHTML += '<div class="ask-error">' + esc(event.message) + '</div>';
@@ -422,6 +467,17 @@ function buildStreamingJs(query: string): string {
     history.pushState(null, '', '/ask?q=' + encodeURIComponent(newQ));
     document.title = 'Ask — ' + newQ + ' — Gloss';
     doStream(newQ);
+  });
+
+  // Handle back/forward between searches (pushState history)
+  window.addEventListener('popstate', function() {
+    var params = new URLSearchParams(location.search);
+    var popQ = params.get('q');
+    if (popQ) {
+      document.querySelector('.ask-search-input').value = popQ;
+      document.title = 'Ask — ' + popQ + ' — Gloss';
+      doStream(popQ);
+    }
   });
 })();
 `;
