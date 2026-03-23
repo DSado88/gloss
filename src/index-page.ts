@@ -330,8 +330,8 @@ function decodeProjectDir(encoded: string): string {
  * Build an index page from session records (SQLite), for server mode.
  * Default view: flat list of recent sessions. Search filters by project/model/id.
  */
-export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddings_enabled?: boolean; min_turns?: number }): string {
-  const cfg = { embeddings_enabled: false, min_turns: 0, ...settings };
+export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddings_enabled?: boolean; min_turns?: number; resume_enabled?: boolean; terminal_app?: string; resume_dangerous_mode?: boolean }): string {
+  const cfg = { embeddings_enabled: false, min_turns: 0, resume_enabled: false, terminal_app: "Terminal", resume_dangerous_mode: false, ...settings };
   const sessionsJson = JSON.stringify(
     sessions.map((s) => {
       // Decode the JSONL directory to a readable project name
@@ -430,9 +430,22 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
     max-width: 1100px;
     margin: 0 auto;
   }
-  .header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; }
+  .header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px; }
   h1 { font-size: 1.4rem; font-weight: 600; }
   .count { color: var(--text2); font-size: 0.85rem; }
+
+  .top-nav {
+    display: flex; gap: 0; margin-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .top-nav-tab {
+    padding: 8px 16px 8px 0; margin-right: 8px;
+    font-size: 0.85rem; font-weight: 500;
+    color: var(--text2); text-decoration: none;
+    border-bottom: 2px solid transparent;
+  }
+  .top-nav-tab:hover { color: var(--text); }
+  .top-nav-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
   .controls { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
   .search {
@@ -551,6 +564,8 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
     padding: 2px 5px; font-size: 0.75rem; border-radius: 3px; line-height: 1;
   }
   .s-actions button:hover { background: var(--surface2); color: var(--text); }
+  .s-actions .resume-btn { color: var(--accent); }
+  .s-actions .resume-btn:hover { color: #3fb950; }
   .session-row.hidden-row { opacity: 0.4; }
   .rename-input {
     background: var(--surface2); border: 1px solid var(--accent); border-radius: 3px;
@@ -664,6 +679,10 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
     <h1>Gloss</h1>
     <span class="count" id="count"></span>
   </div>
+  <div class="top-nav">
+    <a href="/" class="top-nav-tab active">Conversations</a>
+    <a href="/tools" class="top-nav-tab">Tools</a>
+  </div>
   <div class="controls">
     <input class="search" id="search" type="text" placeholder="Search or ask a question..." autofocus>
     <button class="view-btn" id="askBtn" onclick="askAI()" style="display:none">Ask AI</button>
@@ -705,6 +724,33 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
               <button class="view-btn theme-opt" data-theme="auto" onclick="setTheme('auto')" style="padding:4px 8px;font-size:0.75rem">Auto</button>
               <button class="view-btn theme-opt" data-theme="light" onclick="setTheme('light')" style="padding:4px 8px;font-size:0.75rem">Light</button>
               <button class="view-btn theme-opt" data-theme="dark" onclick="setTheme('dark')" style="padding:4px 8px;font-size:0.75rem">Dark</button>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border)">
+          <div class="setting-row">
+            <div>
+              <div class="setting-label">Resume in terminal</div>
+              <div class="setting-note">Show a play button to open sessions in your terminal</div>
+            </div>
+            <div class="setting-toggle" id="resumeToggle" onclick="toggleResume()"></div>
+          </div>
+          <div id="resumeOptions" style="display:none;margin-top:10px">
+            <div class="setting-row">
+              <div class="setting-label">Terminal app</div>
+              <select id="terminalSelect" onchange="saveTerminalApp()" style="background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:0.8rem;padding:3px 8px">
+                <option value="Terminal">Terminal.app</option>
+                <option value="iTerm2">iTerm2</option>
+                <option value="Warp">Warp</option>
+                <option value="Ghostty">Ghostty</option>
+              </select>
+            </div>
+            <div class="setting-row" style="margin-top:8px">
+              <div>
+                <div class="setting-label">Skip permissions</div>
+                <div class="setting-note">Add --dangerously-skip-permissions flag</div>
+              </div>
+              <div class="setting-toggle" id="dangerousToggle" onclick="toggleDangerous()"></div>
             </div>
           </div>
         </div>
@@ -844,6 +890,9 @@ function renderRecent(filtered) {
     const ftsBit = s._ftsMatch ? '<span class="s-fts">' + s._ftsMatch + ' matches</span>' : '';
     html += '<span class="s-session"><span class="s-id">' + s.id + '</span>' + titleBit + ftsBit;
     html += '<span class="s-actions">';
+    if (SETTINGS.resume_enabled) {
+      html += '<button onclick="resumeSession(\\'' + s.id + '\\',event)" title="Resume in terminal" class="resume-btn">&#x25B6;</button>';
+    }
     html += '<button onclick="copyResume(\\'' + s.id + '\\',event)" title="Copy --resume command" class="copy-btn">&#x2398;</button>';
     html += '<button onclick="renameSession(\\'' + s.id + '\\',event)" title="Rename">✎</button>';
     html += '<button onclick="hideSession(\\'' + s.id + '\\',event)" title="' + (s.hidden ? 'Unhide' : 'Hide') + '">' + (s.hidden ? '◉' : '◎') + '</button>';
@@ -1120,6 +1169,44 @@ function copyResume(id, e) {
   });
 }
 
+function resumeSession(id, e) {
+  e.preventDefault();
+  e.stopPropagation();
+  var btn = e.target.closest('.resume-btn') || e.target;
+  btn.textContent = '\\u23F3';
+  fetch('/api/resume', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId: id })
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    btn.innerHTML = data.ok ? '\\u2713' : '\\u2716';
+    setTimeout(function() { btn.innerHTML = '\\u25B6'; }, 1500);
+  }).catch(function() {
+    btn.innerHTML = '\\u2716';
+    setTimeout(function() { btn.innerHTML = '\\u25B6'; }, 1500);
+  });
+}
+
+function toggleResume() {
+  SETTINGS.resume_enabled = !SETTINGS.resume_enabled;
+  document.getElementById('resumeToggle').classList.toggle('on', SETTINGS.resume_enabled);
+  document.getElementById('resumeOptions').style.display = SETTINGS.resume_enabled ? '' : 'none';
+  saveSetting('resume_enabled', SETTINGS.resume_enabled);
+  render();
+}
+
+function saveTerminalApp() {
+  var val = document.getElementById('terminalSelect').value;
+  SETTINGS.terminal_app = val;
+  saveSetting('terminal_app', val);
+}
+
+function toggleDangerous() {
+  SETTINGS.resume_dangerous_mode = !SETTINGS.resume_dangerous_mode;
+  document.getElementById('dangerousToggle').classList.toggle('on', SETTINGS.resume_dangerous_mode);
+  saveSetting('resume_dangerous_mode', SETTINGS.resume_dangerous_mode);
+}
+
 function renameSession(id, e) {
   e.preventDefault();
   e.stopPropagation();
@@ -1132,6 +1219,13 @@ function renameSession(id, e) {
   if (!cell) return;
   const titleSpan = cell.querySelector('.s-title');
 
+  // Temporarily disable the link to prevent Enter from navigating
+  const savedHref = row.getAttribute('href');
+  row.removeAttribute('href');
+  row.style.cursor = 'text';
+  function blockClick(ev) { ev.preventDefault(); ev.stopPropagation(); }
+  row.addEventListener('click', blockClick, true);
+
   const input = document.createElement('input');
   input.className = 'rename-input';
   input.value = oldTitle;
@@ -1142,10 +1236,17 @@ function renameSession(id, e) {
   input.focus();
   input.select();
 
+  var finished = false;
   function finish() {
+    if (finished) return;
+    finished = true;
     const val = input.value.trim();
     input.remove();
     if (titleSpan) titleSpan.style.display = '';
+    // Restore the link
+    if (savedHref) row.setAttribute('href', savedHref);
+    row.style.cursor = '';
+    row.removeEventListener('click', blockClick, true);
     if (val !== oldTitle) {
       fetch('/api/sessions/' + id + '/title', {
         method: 'PATCH',
@@ -1159,8 +1260,8 @@ function renameSession(id, e) {
   }
 
   input.addEventListener('keydown', function(ev) {
-    if (ev.key === 'Enter') { ev.preventDefault(); finish(); }
-    if (ev.key === 'Escape') { input.remove(); if (titleSpan) titleSpan.style.display = ''; }
+    if (ev.key === 'Enter') { ev.preventDefault(); ev.stopPropagation(); finish(); }
+    if (ev.key === 'Escape') { finished = true; input.remove(); if (titleSpan) titleSpan.style.display = ''; if (savedHref) row.setAttribute('href', savedHref); row.style.cursor = ''; row.removeEventListener('click', blockClick, true); }
   });
   input.addEventListener('blur', finish);
 }
@@ -1193,6 +1294,15 @@ function initSettings() {
   toggle.classList.toggle('on', SETTINGS.embeddings_enabled);
   var hiddenToggle = document.getElementById('hiddenToggle');
   if (hiddenToggle) hiddenToggle.classList.toggle('on', showHidden);
+  // Resume settings
+  var resumeToggle = document.getElementById('resumeToggle');
+  if (resumeToggle) resumeToggle.classList.toggle('on', SETTINGS.resume_enabled);
+  var resumeOpts = document.getElementById('resumeOptions');
+  if (resumeOpts) resumeOpts.style.display = SETTINGS.resume_enabled ? '' : 'none';
+  var termSelect = document.getElementById('terminalSelect');
+  if (termSelect) termSelect.value = SETTINGS.terminal_app || 'Terminal';
+  var dangerousToggle = document.getElementById('dangerousToggle');
+  if (dangerousToggle) dangerousToggle.classList.toggle('on', SETTINGS.resume_dangerous_mode);
   updateEmbeddingsNote();
   updateEmbeddingsUI();
 }

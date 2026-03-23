@@ -11,6 +11,7 @@ import { escape } from "./markdown.js";
 import { openDb, type ConvoDb } from "./db.js";
 import { scanProjectsDir, syncToDb, backfillTurnCounts, backfillFtsIndex } from "./discovery.js";
 import { buildServerIndex } from "./index-page.js";
+import { buildToolViewerPage } from "./tool-viewer.js";
 import { EmbeddingEngine, VectorIndex } from "./embeddings.js";
 import { backfillEmbeddings } from "./indexer.js";
 import type { Turn, TextBlock, TocEntry } from "./types.js";
@@ -214,6 +215,21 @@ let indexHtmlCache: string | null = null;
 let indexHtmlCacheTime = 0;
 const INDEX_CACHE_TTL = 30_000;
 
+// Tool viewer cache — eagerly built at startup, refreshed every 5 minutes
+let toolViewerHtmlCache: string | null = null;
+let toolViewerCacheTime = 0;
+const TOOL_VIEWER_CACHE_TTL = 5 * 60_000;
+
+function getToolViewerHtml(): string {
+  const now = Date.now();
+  if (toolViewerHtmlCache && now - toolViewerCacheTime < TOOL_VIEWER_CACHE_TTL) {
+    return toolViewerHtmlCache;
+  }
+  toolViewerHtmlCache = buildToolViewerPage();
+  toolViewerCacheTime = now;
+  return toolViewerHtmlCache;
+}
+
 function getIndexHtml(db: ConvoDb): string {
   const now = Date.now();
   if (indexHtmlCache && now - indexHtmlCacheTime < INDEX_CACHE_TTL) {
@@ -223,6 +239,9 @@ function getIndexHtml(db: ConvoDb): string {
   const settings = {
     embeddings_enabled: db.getSetting("embeddings_enabled") === "1",
     min_turns: parseInt(db.getSetting("min_turns") ?? "0", 10),
+    resume_enabled: db.getSetting("resume_enabled") === "1",
+    terminal_app: db.getSetting("terminal_app") || "Terminal",
+    resume_dangerous_mode: db.getSetting("resume_dangerous_mode") === "1",
   };
   indexHtmlCache = buildServerIndex(allSessions, settings);
   indexHtmlCacheTime = now;
@@ -295,6 +314,11 @@ export async function startServer(options: { port?: number } = {}): Promise<void
     backfillTurnCounts(db, invalidateIndex);
     setTimeout(() => backfillFtsIndex(db, startEmbeddingBackfill), 2000);
   }, 500);
+
+  // Eagerly build tool viewer cache in background so first load is instant
+  setTimeout(() => {
+    try { getToolViewerHtml(); } catch { /* best-effort */ }
+  }, 1000);
 
   // Adaptive rescan with backoff — backs off when no changes, resets on activity
   const MIN_RESCAN_MS = 60_000;
@@ -370,6 +394,142 @@ export async function startServer(options: { port?: number } = {}): Promise<void
         }
       }
 
+      // Resume session in terminal
+      if (pathname === "/api/resume" && req.method === "POST") {
+        const body = (await req.json()) as Record<string, unknown>;
+        const sessionId = (body.sessionId as string) ?? "";
+        if (!sessionId) {
+          return new Response(JSON.stringify({ error: "No session ID" }), {
+            status: 400, headers: { "Content-Type": "application/json" },
+          });
+        }
+        const terminalApp = db.getSetting("terminal_app") || "Terminal";
+        const dangerous = db.getSetting("resume_dangerous_mode") === "1";
+
+        // Resolve the project directory from the session's JSONL path
+        const session = db.getSession(sessionId);
+        let projectDir = "";
+        if (session?.jsonl_path) {
+          // JSONL path is like ~/.claude/projects/-Users-david-Documents-Programs-ori3/session.jsonl
+          // The encoded dir name maps back to the real project path
+          const encodedDir = session.jsonl_path.split("/").slice(-2, -1)[0] ?? "";
+          if (encodedDir.startsWith("-")) {
+            // Try to resolve the real path
+            const { decodeProjectPath } = await import("./tool-viewer.js");
+            const resolved = decodeProjectPath(encodedDir);
+            if (resolved) projectDir = resolved;
+          }
+        }
+
+        const resumeCmd = `claude --resume ${sessionId}${dangerous ? " --dangerously-skip-permissions" : ""}`;
+        const cmd = projectDir ? `cd ${projectDir.replace(/ /g, "\\\\ ")} && ${resumeCmd}` : resumeCmd;
+
+        let script: string;
+        if (terminalApp === "iTerm2" || terminalApp === "iTerm") {
+          script = `tell application "iTerm2"
+            activate
+            create window with default profile
+            tell current session of current window to write text "${cmd}"
+          end tell`;
+        } else if (terminalApp === "Warp") {
+          script = `tell application "Warp"
+            activate
+            delay 0.3
+          end tell
+          tell application "System Events"
+            tell process "Warp"
+              keystroke "n" using command down
+              delay 0.5
+              keystroke "${cmd}"
+              key code 36
+            end tell
+          end tell`;
+        } else if (terminalApp === "Ghostty") {
+          script = `tell application "Ghostty"
+            activate
+          end tell
+          tell application "System Events"
+            tell process "Ghostty"
+              keystroke "n" using command down
+              delay 0.5
+              keystroke "${cmd}"
+              key code 36
+            end tell
+          end tell`;
+        } else {
+          // Terminal.app (default)
+          script = `tell application "Terminal"
+            activate
+            do script "${cmd}"
+          end tell`;
+        }
+
+        try {
+          Bun.spawnSync(["osascript", "-e", script], {
+            stdout: "pipe", stderr: "pipe", timeout: 10_000,
+          });
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        } catch (e) {
+          return new Response(JSON.stringify({ error: String(e) }), {
+            status: 500, headers: { "Content-Type": "application/json" },
+          });
+        }
+      }
+
+      // Folder picker — opens native Finder dialog
+      if (pathname === "/api/pick-folder" && req.method === "POST") {
+        try {
+          const proc = Bun.spawnSync(["osascript", "-e",
+            'tell application "System Events" to set frontmost of process "Google Chrome" to true\n' +
+            'set f to POSIX path of (choose folder with prompt "Select backup destination")\n' +
+            'return f',
+          ], { stdout: "pipe", stderr: "pipe", timeout: 60_000 });
+          const folder = proc.stdout.toString().trim();
+          if (folder) {
+            return new Response(JSON.stringify({ path: folder }), {
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          return new Response(JSON.stringify({ cancelled: true }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        } catch {
+          return new Response(JSON.stringify({ error: "Folder picker not available" }), {
+            status: 500, headers: { "Content-Type": "application/json" },
+          });
+        }
+      }
+
+      // Backup API
+      if (pathname === "/api/backup" && req.method === "POST") {
+        const body = (await req.json()) as Record<string, unknown>;
+        const dest = (body.destination as string) ?? "";
+        const full = !!(body.full);
+        if (!dest) {
+          return new Response(JSON.stringify({ error: "No destination path" }), {
+            status: 400, headers: { "Content-Type": "application/json" },
+          });
+        }
+        try {
+          const scriptPath = path.join(import.meta.dir, "..", "scripts", "backup.ts");
+          const args = [scriptPath, dest];
+          if (full) args.push("--full");
+          const proc = Bun.spawnSync(["bun", ...args], {
+            stdout: "pipe", stderr: "pipe", timeout: 600_000,
+          });
+          const output = proc.stdout.toString() + proc.stderr.toString();
+          return new Response(JSON.stringify({ ok: proc.exitCode === 0, output }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        } catch (e) {
+          return new Response(JSON.stringify({ error: String(e) }), {
+            status: 500, headers: { "Content-Type": "application/json" },
+          });
+        }
+      }
+
       // API routes
       if (pathname.startsWith("/api/")) {
         return handleApiRoute(req, pathname, db, { embeddingEngine, vectorIndex });
@@ -388,6 +548,13 @@ export async function startServer(options: { port?: number } = {}): Promise<void
         const { buildAskLoadingPage } = await import("./ask-page.js");
         const html = buildAskLoadingPage(q);
         return new Response(html, {
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        });
+      }
+
+      // Tool viewer page (cached)
+      if (pathname === "/tools") {
+        return new Response(getToolViewerHtml(), {
           headers: { "Content-Type": "text/html; charset=utf-8" },
         });
       }
@@ -947,6 +1114,15 @@ async function handleApiRouteInner(
     }
     if ("min_turns" in body) {
       db.setSetting("min_turns", String(Math.max(0, Number(body.min_turns) || 0)));
+    }
+    if ("resume_enabled" in body) {
+      db.setSetting("resume_enabled", body.resume_enabled ? "1" : "0");
+    }
+    if ("terminal_app" in body) {
+      db.setSetting("terminal_app", String(body.terminal_app));
+    }
+    if ("resume_dangerous_mode" in body) {
+      db.setSetting("resume_dangerous_mode", body.resume_dangerous_mode ? "1" : "0");
     }
     indexHtmlCache = null;
     return new Response(JSON.stringify({ ok: true }), { headers: jsonHeaders });
