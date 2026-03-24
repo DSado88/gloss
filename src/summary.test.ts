@@ -312,6 +312,45 @@ describe("getSummary", () => {
     expect(result.status).toBe("error");
     expect(result.error).toContain("not found");
   });
+
+  it("returns error status and error message from a previously failed generation", () => {
+    // When a summary generation fails (e.g., timeout), setSummaryError stores the error.
+    // getSummary should return that error status and message to the client.
+    const f = makeJsonl(dir, "err-session", [
+      { role: "user", text: "question" },
+      { role: "assistant", text: "answer" },
+    ]);
+    db.upsertSession({ id: "err-session", jsonl_path: f });
+    db.setSummaryError("err-session", "Summary generation timed out after 20s");
+
+    const result = getSummary(db, "err-session");
+    expect(result.status).toBe("error");
+    expect(result.error).toBe("Summary generation timed out after 20s");
+    expect(result.cached).toBe(false);
+  });
+
+  it("returns generating status when summary is in progress", () => {
+    // When generation is in progress, setSummaryGenerating sets the status.
+    // getSummary should report "generating" to the client.
+    const f = makeJsonl(dir, "gen-session", [
+      { role: "user", text: "question" },
+      { role: "assistant", text: "answer" },
+    ]);
+    db.upsertSession({ id: "gen-session", jsonl_path: f });
+    db.setSummaryGenerating("gen-session");
+
+    const result = getSummary(db, "gen-session");
+    expect(result.status).toBe("generating");
+    expect(result.cached).toBe(false);
+  });
+
+  it("returns error when session exists but has no jsonl_path", () => {
+    // Sessions created before discovery may have no jsonl_path
+    db.upsertSession({ id: "no-path" });
+    const result = getSummary(db, "no-path");
+    expect(result.status).toBe("error");
+    expect(result.error).toContain("not found");
+  });
 });
 
 describe("DB summary methods", () => {
