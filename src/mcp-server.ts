@@ -347,9 +347,7 @@ server.tool(
     "Use this to discover available tags before filtering highlights with get_highlights(tag=...).",
   {},
   async () => {
-    const res = await fetch(`${BASE}/api/tags`);
-    if (!res.ok) return { content: [{ type: "text" as const, text: "Failed to fetch tags" }] };
-    const tags = (await res.json()) as Array<{ name: string; count: number; color?: string }>;
+    const tags = (await glossFetch("/api/tags")) as Array<{ name: string; count: number; color?: string }>;
     if (tags.length === 0) {
       return { content: [{ type: "text" as const, text: "No tags found. Highlights haven't been tagged yet." }] };
     }
