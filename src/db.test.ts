@@ -428,6 +428,17 @@ describe("ConvoDb", () => {
       expect(() => db.searchAnnotations('hello "world')).not.toThrow();
     });
 
+    it("handles punctuation-only queries that FTS5 rejects as syntax errors", () => {
+      // Characters like . , @ # $ % are not stripped by sanitizeFtsQuery but
+      // cause FTS5 syntax errors when they're the only content in the query.
+      // These must not crash — should return empty results.
+      expect(() => db.searchAnnotations("...")).not.toThrow();
+      expect(() => db.searchAnnotations("@#$%")).not.toThrow();
+      expect(() => db.searchAnnotations(",,,")).not.toThrow();
+      expect(() => db.searchAnnotations("hello...world")).not.toThrow();
+      expect(() => db.searchAnnotations(".@#,")).not.toThrow();
+    });
+
     it("query that sanitizes to empty returns no results, not all annotations", () => {
       // "OR AND NOT" are all FTS5 operators → sanitize to "" → no FTS clause
       // Bug: without the fix, the missing FTS clause means NO WHERE filter,

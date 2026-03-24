@@ -434,7 +434,7 @@ export class ConvoDb {
   /** Sanitize a query string for FTS5 MATCH — strips operators and special chars. */
   private sanitizeFtsQuery(query: string): string {
     return query
-      .replace(/[":*^~(){}[\]<>+\-!|&\\/]/g, " ")
+      .replace(/[^a-zA-Z0-9_\s]/g, " ")  // keep only alphanumeric, underscore, whitespace
       .split(/\s+/)
       .filter((t) => t.length > 0 && !/^(AND|OR|NOT|NEAR)$/i.test(t))
       .join(" ")
