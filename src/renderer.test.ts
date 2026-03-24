@@ -564,6 +564,23 @@ describe("renderTurn", () => {
     expect(tocEntry!.preview.length).toBeLessThanOrEqual(120);
   });
 
+  it("skips whitespace-only text blocks for TOC preview", () => {
+    // Bug: a whitespace-only first text block locks firstText to "  ",
+    // preventing the subsequent real text block from being used.
+    // The TOC preview ends up empty when the turn has meaningful text.
+    const turn: Turn = {
+      role: "assistant",
+      blocks: [
+        { type: "text", text: "  " },  // whitespace-only first block
+        { type: "text", text: "The actual helpful answer" },
+      ],
+    };
+    const { tocEntry } = renderTurn(turn, 0, true, true);
+    expect(tocEntry).not.toBeNull();
+    // Preview should show the meaningful text, not be empty from whitespace
+    expect(tocEntry!.preview).toBe("The actual helpful answer");
+  });
+
   it("sets data-block-index attributes on text blocks", () => {
     const turn: Turn = {
       role: "assistant",

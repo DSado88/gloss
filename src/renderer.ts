@@ -207,7 +207,7 @@ export function renderTurn(
           `<div class="message-text" data-block-index="${textBlockIdx}"><p>${rendered}</p></div>`,
         );
         textBlockIdx++;
-        if (!firstText) firstText = block.text;
+        if (!firstText.trim()) firstText = block.text;
         break;
       }
 
