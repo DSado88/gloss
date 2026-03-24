@@ -35,13 +35,22 @@ function updateThemeLabel() {
   const current = document.documentElement.getAttribute('data-theme') || 'auto';
   label.textContent = 'Theme: ' + current;
 }
-// Restore saved theme
+// Restore saved theme and display settings
 (function() {
   const saved = localStorage.getItem('convo-viewer-theme');
   if (saved && saved !== 'auto') {
     document.documentElement.setAttribute('data-theme', saved);
   }
   updateThemeLabel();
+  // Restore display toggles from localStorage
+  ['tools', 'thinking', 'tagging'].forEach(function(key) {
+    var val = localStorage.getItem('gloss_show_' + key);
+    if (val === 'true') {
+      document.body.classList.remove('hide-' + key);
+      var cb = document.getElementById('toggle-' + key);
+      if (cb) cb.checked = true;
+    }
+  });
 })();
 
 // ── Close settings dropdown on outside click ──
@@ -977,16 +986,36 @@ function connectWebSocket() {
   let reconnectDelay = 500;
   const MAX_RECONNECT_DELAY = 10000;
 
-  // Insert LIVE badge into the controls bar
+  // Insert status badge into the controls bar — LIVE (pulsing) when active, ↓ Bottom when idle
+  let lastTurnTime = 0;
+
+  function updateLiveBadge() {
+    var badge = document.getElementById('live-badge');
+    if (!badge) return;
+    var isLive = (Date.now() - lastTurnTime) < 30000;
+    if (isLive && badge.dataset.live !== 'true') {
+      badge.dataset.live = 'true';
+      badge.textContent = 'LIVE';
+      badge.classList.add('is-live');
+    } else if (!isLive && badge.dataset.live !== 'false') {
+      badge.dataset.live = 'false';
+      badge.textContent = '\\u2193 Bottom';
+      badge.classList.remove('is-live');
+    }
+  }
+
   const controlsRight = document.querySelector('.controls-right');
   if (controlsRight) {
     const badge = document.createElement('span');
     badge.className = 'live-badge';
-    badge.textContent = 'LIVE';
+    badge.textContent = '\\u2193 Bottom';
     badge.id = 'live-badge';
     badge.style.cursor = 'pointer';
+    badge.dataset.live = 'false';
     badge.onclick = () => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
     controlsRight.appendChild(badge);
+    setInterval(updateLiveBadge, 5000);
+    updateLiveBadge();
   }
 
   function isNearBottom() {
@@ -1001,6 +1030,10 @@ function connectWebSocket() {
   function handleMessage(evt) {
     let msg;
     try { msg = JSON.parse(evt.data); } catch { return; }
+
+    // Mark session as actively receiving data
+    lastTurnTime = Date.now();
+    if (typeof updateLiveBadge === 'function') updateLiveBadge();
 
     const convoContainer = document.querySelector('.conversation');
     const tocBody = document.getElementById('toc-body');

@@ -253,7 +253,7 @@ describe("renderMarkdownInline", () => {
 
   it("renders [text](url) links", () => {
     const html = renderMarkdownInline("[Click](https://example.com)");
-    expect(html).toContain('<a href="https://example.com">Click</a>');
+    expect(html).toContain('<a href="https://example.com" target="_blank" rel="noopener">Click</a>');
   });
 
   it("rejects javascript: URLs in markdown links", () => {
@@ -270,7 +270,7 @@ describe("renderMarkdownInline", () => {
 
   it("auto-links bare URLs", () => {
     const html = renderMarkdownInline("visit https://example.com today");
-    expect(html).toContain('<a href="https://example.com">https://example.com</a>');
+    expect(html).toContain('<a href="https://example.com" target="_blank" rel="noopener">https://example.com</a>');
   });
 
   it("does not double-link URLs inside markdown link display text", () => {

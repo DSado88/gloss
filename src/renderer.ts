@@ -132,7 +132,6 @@ function resultHeader(isError: boolean, charCount?: number): string {
   const label = isError ? "Error" : "Result";
   const size = charCount != null ? ` (${formatCount(charCount)} chars)` : "";
   return `<div class="tool-result-header" onclick="this.parentElement.classList.toggle('expanded')">
-    <span class="tool-icon">&#9654;</span>
     <span>${label}${size}</span>
     <span class="tool-expand">&#9660;</span>
   </div>`;

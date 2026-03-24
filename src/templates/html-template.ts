@@ -92,9 +92,9 @@ ${cssBlock}
     <div class="settings-menu">
       <button class="settings-toggle" onclick="this.parentElement.classList.toggle('open')" title="Display settings">&#9881;</button>
       <div class="settings-dropdown">
-        <label><input type="checkbox" id="toggle-tools" onchange="document.body.classList.toggle('hide-tools', !this.checked)"> Show tools</label>
-        <label><input type="checkbox" id="toggle-thinking" onchange="document.body.classList.toggle('hide-thinking', !this.checked)"> Show thinking</label>
-        <label><input type="checkbox" id="toggle-tagging" onchange="document.body.classList.toggle('hide-tagging', !this.checked)"> Tags &amp; kinds</label>
+        <label><input type="checkbox" id="toggle-tools" onchange="document.body.classList.toggle('hide-tools', !this.checked);localStorage.setItem('gloss_show_tools',this.checked)"> Show tools</label>
+        <label><input type="checkbox" id="toggle-thinking" onchange="document.body.classList.toggle('hide-thinking', !this.checked);localStorage.setItem('gloss_show_thinking',this.checked)"> Show thinking</label>
+        <label><input type="checkbox" id="toggle-tagging" onchange="document.body.classList.toggle('hide-tagging', !this.checked);localStorage.setItem('gloss_show_tagging',this.checked)"> Tags &amp; kinds</label>
         <hr style="border:none;border-top:1px solid var(--border);margin:4px 0">
         <label style="cursor:pointer" onclick="event.preventDefault();cycleTheme()"><span id="theme-label">Theme: auto</span></label>
       </div>

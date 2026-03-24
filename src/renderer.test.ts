@@ -176,7 +176,7 @@ describe("renderToolResult", () => {
     expect(html).toContain("tool-result");
     expect(html).toContain("File contents here");
     expect(html).toContain("Result");
-    expect(html).toContain("&#9654;"); // play icon
+    expect(html).not.toContain("&#9654;"); // play icon removed — single caret only
     expect(html).not.toContain("tool-error");
   });
 

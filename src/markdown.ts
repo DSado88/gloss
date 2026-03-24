@@ -128,7 +128,7 @@ function applyAutoLinks(text: string): string {
       // Strip trailing sentence punctuation that isn't part of the URL
       const cleaned = url.replace(/[.,;:!?]+$/, "");
       const trailing = url.slice(cleaned.length);
-      return `<a href="${cleaned}">${cleaned}</a>${trailing}`;
+      return `<a href="${cleaned}" target="_blank" rel="noopener">${cleaned}</a>${trailing}`;
     },
   );
   // Auto-link file paths
@@ -174,7 +174,8 @@ function applyInlineFormatting(text: string): string {
       return `${text}`;
     }
     const idx = linkSpans.length;
-    linkSpans.push(`<a href="${url}">${text}</a>`);
+    const external = /^https?:\/\//.test(url);
+    linkSpans.push(`<a href="${url}"${external ? ' target="_blank" rel="noopener"' : ''}>${text}</a>`);
     return `\x01LK${idx}\x01`;
   });
 

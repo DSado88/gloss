@@ -1045,15 +1045,22 @@ export const CSS_STYLES = `
   .export-panel-footer button.primary { background: var(--accent); color: #fff; }
   .export-panel-footer button.primary:hover { background: var(--accent-hover); }
 
-  /* ── Live mode badge ── */
+  /* ── Live / Bottom badge ── */
   .live-badge {
-    background: #e53e3e;
-    color: white;
+    background: var(--surface2);
+    color: var(--text2);
     font-size: 11px;
     font-weight: 600;
     padding: 2px 8px;
     border-radius: 4px;
     letter-spacing: 0.05em;
+    animation: none;
+    cursor: pointer;
+  }
+  .live-badge:hover { background: var(--border); }
+  .live-badge.is-live {
+    background: #e53e3e;
+    color: white;
     animation: live-pulse 2s ease-in-out infinite;
   }
   @keyframes live-pulse {

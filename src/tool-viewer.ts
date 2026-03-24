@@ -831,6 +831,14 @@ export function buildMemoryPage(): string {
   memoryHtml += `<div id="memory-content">`;
 
   for (const [proj, mems] of sortedProjects) {
+    // Sort: MEMORY.md pinned to top, then alphabetically by name
+    mems.sort((a, b) => {
+      const aIsIndex = a.name === "MEMORY";
+      const bIsIndex = b.name === "MEMORY";
+      if (aIsIndex && !bIsIndex) return -1;
+      if (!aIsIndex && bIsIndex) return 1;
+      return a.name.localeCompare(b.name);
+    });
     memoryHtml += `<div class="skill-group"><div class="group-label">${esc(proj)}<span class="group-count">${mems.length}</span></div>`;
     memoryHtml += `<div class="skill-list">`;
     for (const m of mems) {

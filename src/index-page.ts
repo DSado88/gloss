@@ -974,7 +974,7 @@ function renderRecent(filtered) {
     }
     html += '<button onclick="copyResume(\\'' + s.id + '\\',event)"><span class="menu-icon">\\u2398</span>Copy resume command</button>';
     html += '<button onclick="renameSession(\\'' + s.id + '\\',event)"><span class="menu-icon">\\u270E</span>Rename</button>';
-    html += '<button onclick="previewSession(\\'' + s.id + '\\',event)"><span class="menu-icon">\\u25BC</span>Preview last turn</button>';
+    html += '<button onclick="previewSession(\\'' + s.id + '\\',event)" id="preview-btn-' + s.id + '"><span class="menu-icon">\\u25BC</span>Preview last turn</button>';
     html += '<button onclick="hideSession(\\'' + s.id + '\\',event)"><span class="menu-icon">' + (s.hidden ? '\\u25C9' : '\\u25CE') + '</span>' + (s.hidden ? 'Unhide' : 'Hide') + '</button>';
     html += '</div>';
     html += '</span>';
@@ -1258,13 +1258,23 @@ function toggleRowMenu(id, e) {
     menu.style.right = (window.innerWidth - rect.right) + 'px';
     menu.style.left = 'auto';
     menu.classList.add('open');
+    // Sync preview button text with current preview state
+    var previewBtn = document.getElementById('preview-btn-' + id);
+    var previewPanel = document.getElementById('preview-' + id);
+    if (previewBtn && previewPanel) {
+      var isOpen = previewPanel.classList.contains('open');
+      previewBtn.innerHTML = '<span class="menu-icon">' + (isOpen ? '\\u25B2' : '\\u25BC') + '</span>' + (isOpen ? 'Hide preview' : 'Preview last turn');
+    }
   }
 }
 
-// Close menus when clicking outside
+// Close menus and previews when clicking outside
 document.addEventListener('click', function(e) {
   if (!e.target.closest('.s-actions')) {
     document.querySelectorAll('.s-actions-menu.open').forEach(function(m) { m.classList.remove('open'); });
+  }
+  if (!e.target.closest('.s-preview') && !e.target.closest('.s-actions')) {
+    document.querySelectorAll('.s-preview.open').forEach(function(p) { p.classList.remove('open'); p.innerHTML = ''; });
   }
 });
 
