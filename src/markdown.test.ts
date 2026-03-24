@@ -590,4 +590,22 @@ describe("renderMarkdownInline", () => {
     const thCount = (html.match(/<th>/g) || []).length;
     expect(thCount).toBe(2);
   });
+
+  // --- Inline code inside auto-links ---
+
+  it("does not auto-link URLs inside inline code spans", () => {
+    const html = renderMarkdownInline("Use `https://example.com/api` as the endpoint");
+    // The URL should be inside <code> and NOT wrapped in <a>
+    expect(html).toContain("<code>https://example.com/api</code>");
+    expect(html).not.toContain('<a href="https://example.com/api"');
+  });
+
+  // --- Heading right after code block (no blank line) ---
+
+  it("heading immediately after code block renders correctly", () => {
+    const md = "```\ncode\n```\n## Section Title";
+    const html = renderMarkdownInline(md);
+    expect(html).toContain("<pre>");
+    expect(html).toContain("<h4>Section Title</h4>");
+  });
 });
