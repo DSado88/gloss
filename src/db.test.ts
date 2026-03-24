@@ -1178,6 +1178,41 @@ describe("ConvoDb", () => {
       expect(db.embeddingNeedsIndexing("emb-s3", 100)).toBe(true);
     });
 
+    it("storeEmbeddings with empty entries still records status (indexed 0 turns)", () => {
+      db.upsertSession({ id: "emb-empty" });
+      db.storeEmbeddings("emb-empty", [], 500);
+
+      // Should still track that this session was indexed (0 turns)
+      expect(db.embeddingNeedsIndexing("emb-empty", 500)).toBe(false);
+      expect(db.embeddingNeedsIndexing("emb-empty", 600)).toBe(true);
+      // loadAllEmbeddings returns nothing for this session
+      const data = db.loadAllEmbeddings();
+      expect(data.sessionIds.filter(id => id === "emb-empty")).toHaveLength(0);
+    });
+
+    it("loadAllEmbeddings skips corrupt blobs with wrong byte length", () => {
+      db.upsertSession({ id: "emb-corrupt" });
+      // Store a valid embedding first
+      db.storeEmbeddings("emb-corrupt", [
+        { turnIndex: 0, role: "user", textHash: "ok", embedding: makeEmbedding(0) },
+      ], 100);
+
+      // Manually insert a corrupt (truncated) blob directly via SQL
+      const shortBlob = Buffer.alloc(100); // 100 bytes, not 1024 (256 × 4)
+      db.db.run(
+        "INSERT INTO turn_embeddings (session_id, turn_index, role, text_hash, embedding) VALUES (?, ?, ?, ?, ?)",
+        ["emb-corrupt", 1, "assistant", "bad", shortBlob],
+      );
+
+      // loadAllEmbeddings should skip the corrupt row and return only the valid one
+      const data = db.loadAllEmbeddings();
+      const indices = data.sessionIds
+        .map((id, i) => id === "emb-corrupt" ? i : -1)
+        .filter((i) => i >= 0);
+      expect(indices).toHaveLength(1);
+      expect(data.turnIndices[indices[0]]).toBe(0); // only the valid turn-0
+    });
+
     it("storeEmbeddings replaces existing embeddings atomically", () => {
       db.upsertSession({ id: "emb-s4" });
       db.storeEmbeddings("emb-s4", [
