@@ -735,6 +735,23 @@ describe("ConvoDb", () => {
       const ann = db.getSessionAnnotations("s1");
       expect(ann[0].tags).toEqual([]);
     });
+
+    it("deduplicates when given duplicate tag names", () => {
+      db.upsertSession({ id: "s1" });
+      db.upsertAnnotation({
+        id: "ann1",
+        session_id: "s1",
+        turn_index: 0,
+        block_index: 0,
+        char_start: 0,
+        char_end: 5,
+        text: "hello",
+      });
+      // Pass duplicate tags — should be deduped by INSERT OR IGNORE
+      db.replaceAnnotationTags("ann1", ["dup", "dup", "other", "dup"]);
+      const ann = db.getSessionAnnotations("s1");
+      expect(ann[0].tags.sort()).toEqual(["dup", "other"]);
+    });
   });
 
   // -----------------------------------------------------------------------
