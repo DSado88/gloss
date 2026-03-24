@@ -11,7 +11,7 @@ import { escape } from "./markdown.js";
 import { openDb, type ConvoDb } from "./db.js";
 import { scanProjectsDir, syncToDb, backfillTurnCounts, backfillFtsIndex } from "./discovery.js";
 import { buildServerIndex } from "./index-page.js";
-import { buildToolViewerPage } from "./tool-viewer.js";
+import { buildToolViewerPage, buildMemoryPage } from "./tool-viewer.js";
 import { EmbeddingEngine, VectorIndex } from "./embeddings.js";
 import { backfillEmbeddings } from "./indexer.js";
 import type { Turn, TextBlock, TocEntry } from "./types.js";
@@ -242,6 +242,10 @@ function getIndexHtml(db: ConvoDb): string {
     resume_enabled: db.getSetting("resume_enabled") === "1",
     terminal_app: db.getSetting("terminal_app") || "Terminal",
     resume_dangerous_mode: db.getSetting("resume_dangerous_mode") === "1",
+    quick_launch_name: (() => {
+      const p = db.getSetting("quick_launch_path");
+      return p ? path.basename(p) : "";
+    })(),
   };
   indexHtmlCache = buildServerIndex(allSessions, settings);
   indexHtmlCacheTime = now;
@@ -394,6 +398,42 @@ export async function startServer(options: { port?: number } = {}): Promise<void
         }
       }
 
+      // Spawn quick-launch project in a new terminal window
+      if (pathname === "/api/spawn-quick" && req.method === "POST") {
+        const quickPath = db.getSetting("quick_launch_path");
+        if (!quickPath) {
+          return new Response(JSON.stringify({ error: "No quick launch path configured" }), { status: 400, headers: { "Content-Type": "application/json" } });
+        }
+        const terminalApp = db.getSetting("terminal_app") || "Terminal";
+        const cmd = `cd ${quickPath.replace(/ /g, "\\\\ ")} && claude --dangerously-skip-permissions`;
+        let script: string;
+        if (terminalApp === "Warp") {
+          script = `tell application "Warp" to activate
+          delay 0.3
+          tell application "System Events" to tell process "Warp"
+            keystroke "n" using command down
+            delay 0.5
+            keystroke "${cmd}"
+            key code 36
+          end tell`;
+        } else if (terminalApp === "iTerm2" || terminalApp === "iTerm") {
+          script = `tell application "iTerm2"
+            activate
+            create window with default profile
+            tell current session of current window to write text "${cmd}"
+          end tell`;
+        } else {
+          script = `tell application "Terminal" to activate
+          tell application "Terminal" to do script "${cmd}"`;
+        }
+        try {
+          Bun.spawnSync(["osascript", "-e", script], { stdout: "pipe", stderr: "pipe", timeout: 10_000 });
+          return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } });
+        } catch {
+          return new Response(JSON.stringify({ error: "Failed" }), { status: 500, headers: { "Content-Type": "application/json" } });
+        }
+      }
+
       // Resume session in terminal
       if (pathname === "/api/resume" && req.method === "POST") {
         const body = (await req.json()) as Record<string, unknown>;
@@ -478,6 +518,49 @@ export async function startServer(options: { port?: number } = {}): Promise<void
         }
       }
 
+      // Preview last turns — returns rendered HTML
+      if (pathname.match(/^\/api\/sessions\/([^/]+)\/preview$/) && req.method === "GET") {
+        const sessionId = pathname.split("/")[3];
+        const session = db.getSession(sessionId);
+        if (!session?.jsonl_path || !fs.existsSync(session.jsonl_path)) {
+          return new Response("<div class='preview-loading'>Session not found</div>", {
+            headers: { "Content-Type": "text/html; charset=utf-8" },
+          });
+        }
+        try {
+          const { renderMarkdownInline } = await import("./markdown.js");
+          const { IncrementalParser } = await import("./incremental-parser.js");
+          const parser = new IncrementalParser();
+          const content = fs.readFileSync(session.jsonl_path, "utf-8");
+          parser.feedLines(content.split("\n"));
+          const turns = parser.getTurns();
+          // Get last 2 turns
+          const lastTurns = turns.slice(-2);
+          let html = "";
+          for (const turn of lastTurns) {
+            const role = turn.role ?? "assistant";
+            const label = role === "user" ? "You" : "Claude";
+            const texts = turn.blocks
+              .filter((b): b is import("./types.js").TextBlock => b.type === "text")
+              .map((b) => b.text || "");
+            let text = texts.join("\n").trim();
+            if (text.length > 1500) text = text.substring(0, 1500) + "\n\n[truncated...]";
+            const rendered = renderMarkdownInline(text);
+            html += `<div class="preview-turn turn-${role}">`;
+            html += `<div class="preview-role">${label}</div>`;
+            html += `<div class="preview-content">${rendered}</div>`;
+            html += `</div>`;
+          }
+          return new Response(html || "<div class='preview-loading'>No turns</div>", {
+            headers: { "Content-Type": "text/html; charset=utf-8" },
+          });
+        } catch {
+          return new Response("<div class='preview-loading'>Failed to load</div>", {
+            headers: { "Content-Type": "text/html; charset=utf-8" },
+          });
+        }
+      }
+
       // Folder picker — opens native Finder dialog
       if (pathname === "/api/pick-folder" && req.method === "POST") {
         try {
@@ -547,6 +630,14 @@ export async function startServer(options: { port?: number } = {}): Promise<void
         if (!q) return Response.redirect("/");
         const { buildAskLoadingPage } = await import("./ask-page.js");
         const html = buildAskLoadingPage(q);
+        return new Response(html, {
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        });
+      }
+
+      // Memory page
+      if (pathname === "/memory") {
+        const html = buildMemoryPage();
         return new Response(html, {
           headers: { "Content-Type": "text/html; charset=utf-8" },
         });

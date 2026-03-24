@@ -69,6 +69,15 @@ interface PluginInfo {
   lastUpdated: string;
 }
 
+interface MemoryFile {
+  name: string;
+  description: string;
+  type: string; // user, feedback, project, reference
+  project: string;
+  content: string;
+  path: string;
+}
+
 interface HookInfo {
   event: string;
   type: string;
@@ -428,6 +437,53 @@ function scanMcpJsonFile(filePath: string, project: string): McpServerInfo[] {
   return results;
 }
 
+/** Scan memory files from all project memory directories. */
+function scanMemoryFiles(): MemoryFile[] {
+  const results: MemoryFile[] = [];
+  const projectsDir = path.join(os.homedir(), ".claude", "projects");
+  if (!fs.existsSync(projectsDir)) return results;
+
+  try {
+    const projDirs = fs.readdirSync(projectsDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory());
+    for (const d of projDirs) {
+      const memDir = path.join(projectsDir, d.name, "memory");
+      if (!fs.existsSync(memDir)) continue;
+      const projName = decodeProjectDir(d.name);
+
+      const files = fs.readdirSync(memDir).filter((f) => f.endsWith(".md"));
+      for (const file of files) {
+        const filePath = path.join(memDir, file);
+        try {
+          const raw = fs.readFileSync(filePath, "utf-8");
+          const fmMatch = raw.match(/^---\n([\s\S]*?)\n---/);
+          let name = file.replace(/\.md$/, "");
+          let description = "";
+          let type = "project";
+          if (fmMatch) {
+            const fm = fmMatch[1];
+            const nameMatch = fm.match(/^name:\s*(.+)$/m);
+            if (nameMatch) name = nameMatch[1].trim();
+            const descMatch = fm.match(/^description:\s*(.+)$/m);
+            if (descMatch) description = descMatch[1].trim();
+            const typeMatch = fm.match(/^type:\s*(.+)$/m);
+            if (typeMatch) type = typeMatch[1].trim();
+          }
+          results.push({
+            name,
+            description,
+            type,
+            project: projName,
+            content: stripFrontmatter(raw),
+            path: filePath,
+          });
+        } catch { /* skip */ }
+      }
+    }
+  } catch { /* skip */ }
+  return results;
+}
+
 /** Extract MCP permission names from a settings.json file. */
 function getMcpPermissions(settingsPath: string): string[] {
   const settings = readJsonSafe(settingsPath) as Record<string, unknown> | null;
@@ -743,6 +799,241 @@ function groupByPrefix<T extends { name: string }>(items: T[]): Map<string, T[]>
 /** Capitalize a prefix for display: "sage" → "Sage", "gloss" → "Gloss". */
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+export function buildMemoryPage(): string {
+  const memories = scanMemoryFiles();
+
+  // Group by project
+  const byProject = new Map<string, MemoryFile[]>();
+  for (const m of memories) {
+    if (!byProject.has(m.project)) byProject.set(m.project, []);
+    byProject.get(m.project)!.push(m);
+  }
+  // Sort projects by memory count desc
+  const sortedProjects = [...byProject.entries()].sort((a, b) => b[1].length - a[1].length);
+
+  // Pre-render content
+  const allDetails: Record<string, string> = {};
+  for (const m of memories) {
+    allDetails[m.project + "|" + m.name] = renderMarkdownInline(m.content.slice(0, 4000));
+  }
+
+  // Type badge colors
+  const typeColors: Record<string, { bg: string; fg: string }> = {
+    user: { bg: "var(--blue-bg, rgba(88,166,255,0.1))", fg: "var(--blue, #58a6ff)" },
+    feedback: { bg: "var(--purple-bg, rgba(188,140,255,0.1))", fg: "var(--purple, #bc8cff)" },
+    project: { bg: "var(--green-bg, rgba(63,185,80,0.1))", fg: "var(--green, #3fb950)" },
+    reference: { bg: "var(--yellow-bg, rgba(210,153,34,0.1))", fg: "var(--yellow, #d29922)" },
+  };
+
+  let memoryHtml = `<input class="tab-search" type="text" placeholder="Filter memories..." oninput="filterRows(this, 'memory-content')">`;
+  memoryHtml += `<div id="memory-content">`;
+
+  for (const [proj, mems] of sortedProjects) {
+    memoryHtml += `<div class="skill-group"><div class="group-label">${esc(proj)}<span class="group-count">${mems.length}</span></div>`;
+    memoryHtml += `<div class="skill-list">`;
+    for (const m of mems) {
+      const key = m.project + "|" + m.name;
+      const tc = typeColors[m.type] ?? typeColors.project;
+      memoryHtml += `
+      <div class="skill-row" onclick="toggleDetail('${escJs(key)}')" data-name="${esc(m.name + " " + m.project)}" data-desc="${esc(m.description)}">
+        <span class="skill-name">${esc(m.name)}</span>
+        <span class="skill-desc">${esc(m.description)}</span>
+        <span class="skill-badges">
+          <span class="meta-chip" style="background:${tc.bg};color:${tc.fg}">${esc(m.type)}</span>
+        </span>
+        <span class="skill-chevron">\u25B6</span>
+      </div>
+      <div class="skill-detail" id="detail-${esc(key.replace(/[^a-zA-Z0-9]/g, "_"))}"></div>`;
+    }
+    memoryHtml += `</div></div>`;
+  }
+  memoryHtml += `</div>`;
+
+  if (memories.length === 0) {
+    memoryHtml = '<div class="empty-state">No memory files found</div>';
+  }
+
+  // Reuse the same page shell as the tool viewer
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gloss — Memory</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --surface2: #21262d;
+    --text: #e6edf3; --text2: #7d8590; --border: #30363d;
+    --accent: #da7756; --accent2: #da775620;
+    --green: #3fb950; --green-bg: rgba(63, 185, 80, 0.1);
+    --blue: #58a6ff; --blue-bg: rgba(88, 166, 255, 0.1);
+    --purple: #bc8cff; --purple-bg: rgba(188, 140, 255, 0.1);
+    --yellow: #d29922; --yellow-bg: rgba(210, 153, 34, 0.1);
+    --cyan: #39d2c0; --cyan-bg: rgba(57, 210, 192, 0.1);
+  }
+  @media (prefers-color-scheme: light) { :root {
+    --bg: #f6f8fa; --surface: #ffffff; --surface2: #f0f2f5;
+    --text: #1f2328; --text2: #656d76; --border: #d0d7de;
+    --accent: #c2613a; --accent2: #c2613a15;
+    --green: #1a7f37; --green-bg: rgba(26, 127, 55, 0.08);
+    --blue: #0969da; --blue-bg: rgba(9, 105, 218, 0.08);
+    --purple: #8250df; --purple-bg: rgba(130, 80, 223, 0.08);
+    --yellow: #9a6700; --yellow-bg: rgba(154, 103, 0, 0.08);
+    --cyan: #0d9488; --cyan-bg: rgba(13, 148, 136, 0.08);
+  }}
+  [data-theme="light"] {
+    --bg: #f6f8fa; --surface: #ffffff; --surface2: #f0f2f5;
+    --text: #1f2328; --text2: #656d76; --border: #d0d7de;
+    --accent: #c2613a; --accent2: #c2613a15;
+    --green: #1a7f37; --green-bg: rgba(26, 127, 55, 0.08);
+    --blue: #0969da; --blue-bg: rgba(9, 105, 218, 0.08);
+    --purple: #8250df; --purple-bg: rgba(130, 80, 223, 0.08);
+    --yellow: #9a6700; --yellow-bg: rgba(154, 103, 0, 0.08);
+    --cyan: #0d9488; --cyan-bg: rgba(13, 148, 136, 0.08);
+  }
+  [data-theme="dark"] {
+    --bg: #0d1117; --surface: #161b22; --surface2: #21262d;
+    --text: #e6edf3; --text2: #7d8590; --border: #30363d;
+    --accent: #da7756; --accent2: #da775620;
+    --green: #3fb950; --green-bg: rgba(63, 185, 80, 0.1);
+    --blue: #58a6ff; --blue-bg: rgba(88, 166, 255, 0.1);
+    --purple: #bc8cff; --purple-bg: rgba(188, 140, 255, 0.1);
+    --yellow: #d29922; --yellow-bg: rgba(210, 153, 34, 0.1);
+    --cyan: #39d2c0; --cyan-bg: rgba(57, 210, 192, 0.1);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg); color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    padding: 32px 24px; max-width: 1100px; margin: 0 auto;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .page-header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+  .page-header h1 { font-size: 1.4rem; font-weight: 600; }
+  .top-nav { display: flex; gap: 0; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
+  .top-nav-tab {
+    padding: 8px 16px 8px 0; margin-right: 8px;
+    font-size: 0.85rem; font-weight: 500;
+    color: var(--text2); text-decoration: none;
+    border-bottom: 2px solid transparent;
+  }
+  .top-nav-tab:hover { color: var(--text); text-decoration: none; }
+  .top-nav-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .section-desc { font-size: 0.8rem; color: var(--text2); margin-bottom: 16px; line-height: 1.4; }
+  .tab-search {
+    width: 100%; padding: 8px 12px; margin-bottom: 16px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); font-size: 0.85rem; outline: none; font-family: inherit;
+  }
+  .tab-search:focus { border-color: var(--accent); }
+  .skill-group { margin-bottom: 20px; }
+  .group-label {
+    font-size: 0.82rem; font-weight: 600; color: var(--text);
+    margin-bottom: 4px; padding: 4px 0; display: flex; align-items: center; gap: 8px;
+  }
+  .group-count {
+    font-size: 0.68rem; background: var(--surface2); color: var(--text2);
+    padding: 1px 6px; border-radius: 10px; font-weight: 500;
+  }
+  .skill-list {
+    background: var(--border); border-radius: 8px; overflow: hidden;
+    display: flex; flex-direction: column; gap: 1px;
+  }
+  .skill-row {
+    display: grid; grid-template-columns: 200px 1fr auto 16px;
+    gap: 12px; align-items: center; padding: 10px 14px;
+    background: var(--surface); cursor: pointer; transition: background 0.1s;
+  }
+  .skill-row:hover { background: var(--surface2); }
+  .skill-name { font-size: 0.85rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .skill-desc { font-size: 0.8rem; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .skill-badges { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
+  .skill-chevron { color: var(--text2); font-size: 0.6rem; transition: transform 0.15s; flex-shrink: 0; }
+  .meta-chip {
+    font-size: 0.7rem; padding: 2px 8px; border-radius: 4px;
+    background: var(--surface2); color: var(--text2);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .skill-detail {
+    display: none; padding: 16px 20px; background: var(--surface);
+    border-top: 1px solid var(--border);
+    font-size: 0.82rem; line-height: 1.6; color: var(--text);
+    max-height: 400px; overflow-y: auto;
+  }
+  .skill-detail.open { display: block; }
+  .skill-detail h1, .skill-detail h2, .skill-detail h3, .skill-detail h4 { font-weight: 600; margin: 12px 0 6px; }
+  .skill-detail h1 { font-size: 1.1rem; } .skill-detail h2 { font-size: 0.95rem; } .skill-detail h3 { font-size: 0.88rem; }
+  .skill-detail p { margin: 6px 0; }
+  .skill-detail ul, .skill-detail ol { margin: 6px 0; padding-left: 20px; }
+  .skill-detail li { margin: 2px 0; }
+  .skill-detail code { font-family: 'SF Mono','Fira Code',monospace; font-size: 0.78rem; background: var(--surface2); padding: 1px 5px; border-radius: 3px; }
+  .skill-detail pre { background: var(--surface2); padding: 10px 12px; border-radius: 6px; overflow-x: auto; margin: 8px 0; font-size: 0.75rem; }
+  .skill-detail pre code { background: none; padding: 0; }
+  .skill-detail strong { font-weight: 600; }
+  .skill-detail em { font-style: italic; color: var(--text2); }
+  .skill-detail hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+  .skill-detail a { color: var(--accent); }
+  .empty-state { text-align: center; padding: 32px; color: var(--text2); font-size: 0.85rem; }
+  @media (max-width: 700px) { .skill-row { grid-template-columns: 1fr auto 16px; } .skill-desc { display: none; } }
+</style>
+</head>
+<body>
+  <div class="page-header"><h1>Gloss</h1></div>
+  <div class="top-nav">
+    <a href="/" class="top-nav-tab">Conversations</a>
+    <a href="/memory" class="top-nav-tab active">Memory</a>
+    <a href="/tools" class="top-nav-tab">Tools</a>
+  </div>
+  <div class="section-desc">${memories.length} memory files across ${sortedProjects.length} projects. Color indicates type: <span style="color:var(--green)">project</span>, <span style="color:var(--purple)">feedback</span>, <span style="color:var(--blue)">user</span>, <span style="color:var(--yellow)">reference</span>.</div>
+  ${memoryHtml}
+<script>
+var DETAILS = ${JSON.stringify(allDetails).replace(/<\//g, "<\\/")};
+
+function filterRows(input, containerId) {
+  var q = input.value.toLowerCase();
+  var container = document.getElementById(containerId);
+  if (!container) return;
+  container.querySelectorAll('.skill-row').forEach(function(row) {
+    var name = (row.getAttribute('data-name') || '').toLowerCase();
+    var desc = (row.getAttribute('data-desc') || '').toLowerCase();
+    var match = !q || name.includes(q) || desc.includes(q);
+    row.style.display = match ? '' : 'none';
+    var next = row.nextElementSibling;
+    if (next && next.classList.contains('skill-detail')) {
+      if (!match) { next.style.display = 'none'; next.classList.remove('open'); }
+      else { next.style.removeProperty('display'); }
+    }
+  });
+  container.querySelectorAll('.skill-group').forEach(function(group) {
+    var visible = group.querySelectorAll('.skill-row:not([style*="display: none"])').length;
+    group.style.display = visible > 0 ? '' : 'none';
+  });
+}
+
+function toggleDetail(key) {
+  var safeId = 'detail-' + key.replace(/[^a-zA-Z0-9]/g, '_');
+  var el = document.getElementById(safeId);
+  if (!el) return;
+  if (el.classList.contains('open')) { el.classList.remove('open'); el.innerHTML = ''; return; }
+  document.querySelectorAll('.skill-detail.open').forEach(function(d) { d.classList.remove('open'); d.innerHTML = ''; });
+  var content = DETAILS[key];
+  if (content) { el.innerHTML = content; el.classList.add('open'); }
+}
+
+(function() {
+  var saved = localStorage.getItem('convo-viewer-theme');
+  if (saved && saved !== 'auto') document.documentElement.setAttribute('data-theme', saved);
+})();
+</script>
+</body>
+</html>`;
 }
 
 export function buildToolViewerPage(): string {
@@ -1225,6 +1516,7 @@ export function buildToolViewerPage(): string {
   <div class="page-header"><h1>Gloss</h1></div>
   <div class="top-nav">
     <a href="/" class="top-nav-tab">Conversations</a>
+    <a href="/memory" class="top-nav-tab">Memory</a>
     <a href="/tools" class="top-nav-tab active">Tools</a>
   </div>
 

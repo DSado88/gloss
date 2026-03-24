@@ -330,8 +330,8 @@ function decodeProjectDir(encoded: string): string {
  * Build an index page from session records (SQLite), for server mode.
  * Default view: flat list of recent sessions. Search filters by project/model/id.
  */
-export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddings_enabled?: boolean; min_turns?: number; resume_enabled?: boolean; terminal_app?: string; resume_dangerous_mode?: boolean }): string {
-  const cfg = { embeddings_enabled: false, min_turns: 0, resume_enabled: false, terminal_app: "Terminal", resume_dangerous_mode: false, ...settings };
+export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddings_enabled?: boolean; min_turns?: number; resume_enabled?: boolean; terminal_app?: string; resume_dangerous_mode?: boolean; quick_launch_name?: string }): string {
+  const cfg = { embeddings_enabled: false, min_turns: 0, resume_enabled: false, terminal_app: "Terminal", resume_dangerous_mode: false, quick_launch_name: "", ...settings };
   const sessionsJson = JSON.stringify(
     sessions.map((s) => {
       // Decode the JSONL directory to a readable project name
@@ -384,6 +384,12 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
     --accent: #da7756;
     --accent2: #da775620;
     --logo-invert: invert(1);
+    --user-bg: rgba(45, 212, 191, 0.08);
+    --user-border: #2dd4bf;
+    --user-label: #5eead4;
+    --assistant-bg: rgba(218, 119, 86, 0.08);
+    --assistant-border: #da7756;
+    --assistant-label: #e8956e;
   }
   @media (prefers-color-scheme: light) {
     :root {
@@ -396,29 +402,27 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
       --accent: #c2613a;
       --accent2: #c2613a15;
       --logo-invert: none;
+      --user-bg: rgba(13, 148, 136, 0.06);
+      --user-border: #0d9488;
+      --user-label: #0f766e;
+      --assistant-bg: rgba(218, 119, 86, 0.06);
+      --assistant-border: #da7756;
+      --assistant-label: #c4633e;
     }
   }
   [data-theme="light"] {
-    --bg: #f6f8fa;
-    --surface: #ffffff;
-    --surface2: #f0f2f5;
-    --text: #1f2328;
-    --text2: #656d76;
-    --border: #d0d7de;
-    --accent: #c2613a;
-    --accent2: #c2613a15;
-    --logo-invert: none;
+    --bg: #f6f8fa; --surface: #ffffff; --surface2: #f0f2f5;
+    --text: #1f2328; --text2: #656d76; --border: #d0d7de;
+    --accent: #c2613a; --accent2: #c2613a15; --logo-invert: none;
+    --user-bg: rgba(13, 148, 136, 0.06); --user-border: #0d9488; --user-label: #0f766e;
+    --assistant-bg: rgba(218, 119, 86, 0.06); --assistant-border: #da7756; --assistant-label: #c4633e;
   }
   [data-theme="dark"] {
-    --bg: #0d1117;
-    --surface: #161b22;
-    --surface2: #21262d;
-    --text: #e6edf3;
-    --text2: #7d8590;
-    --border: #30363d;
-    --accent: #da7756;
-    --accent2: #da775620;
-    --logo-invert: invert(1);
+    --bg: #0d1117; --surface: #161b22; --surface2: #21262d;
+    --text: #e6edf3; --text2: #7d8590; --border: #30363d;
+    --accent: #da7756; --accent2: #da775620; --logo-invert: invert(1);
+    --user-bg: rgba(45, 212, 191, 0.08); --user-border: #2dd4bf; --user-label: #5eead4;
+    --assistant-bg: rgba(218, 119, 86, 0.08); --assistant-border: #da7756; --assistant-label: #e8956e;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -484,8 +488,8 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
   }
   .session-row {
     display: grid;
-    grid-template-columns: 120px 1fr 80px 50px 60px;
-    gap: 10px;
+    grid-template-columns: 120px 1fr 72px 52px 58px 20px;
+    gap: 8px;
     align-items: center;
     padding: 10px 14px;
     background: var(--surface);
@@ -507,6 +511,7 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
   .session-row.table-header span[data-sort] {
     cursor: pointer;
     user-select: none;
+    white-space: nowrap;
   }
   .session-row.table-header span[data-sort]:hover { color: var(--accent); }
   .session-row.table-header span[data-sort].sort-active { color: var(--accent); }
@@ -555,18 +560,67 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
 
   .empty { text-align: center; padding: 40px; color: var(--text2); }
   .s-actions {
-    display: flex; gap: 2px; align-items: center; opacity: 0; transition: opacity 0.1s;
-    margin-left: auto; flex-shrink: 0;
+    position: relative; margin-left: auto; flex-shrink: 0;
+    opacity: 0; transition: opacity 0.1s;
   }
   .session-row:hover .s-actions { opacity: 1; }
-  .s-actions button {
+  .s-actions:has(.open) { opacity: 1; }
+  .s-actions-trigger {
     background: none; border: none; color: var(--text2); cursor: pointer;
-    padding: 2px 5px; font-size: 0.75rem; border-radius: 3px; line-height: 1;
+    padding: 2px 6px; font-size: 1rem; border-radius: 4px; line-height: 1;
+    letter-spacing: 1px;
   }
-  .s-actions button:hover { background: var(--surface2); color: var(--text); }
-  .s-actions .resume-btn { color: var(--accent); }
-  .s-actions .resume-btn:hover { color: #3fb950; }
+  .s-actions-trigger:hover { background: var(--surface2); color: var(--text); }
+  .s-actions-menu {
+    display: none; position: fixed; z-index: 200;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 4px 0; min-width: 200px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  }
+  .s-actions-menu.open { display: block; }
+  .s-actions-menu button {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    background: none; border: none; color: var(--text); cursor: pointer;
+    padding: 7px 14px; font-size: 0.82rem; text-align: left; font-family: inherit;
+  }
+  .s-actions-menu button:hover { background: var(--surface2); }
+  .s-actions-menu button .menu-icon { color: var(--text2); width: 16px; text-align: center; font-size: 0.85rem; }
   .session-row.hidden-row { opacity: 0.4; }
+
+  .s-preview {
+    display: none; padding: 0;
+    background: var(--surface);
+    max-height: 350px; overflow-y: auto;
+  }
+  .s-preview.open { display: block; }
+  .s-preview .preview-turn {
+    padding: 14px 20px; border-left: 3px solid var(--border);
+  }
+  .s-preview .preview-turn.turn-user { border-left-color: var(--user-border); background: var(--user-bg); }
+  .s-preview .preview-turn.turn-assistant { border-left-color: var(--assistant-border); background: var(--assistant-bg); }
+  .s-preview .preview-turn + .preview-turn { border-top: 1px solid var(--border); }
+  .s-preview .preview-role {
+    font-size: 12px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; margin-bottom: 6px;
+  }
+  .s-preview .turn-user .preview-role { color: var(--user-label); }
+  .s-preview .turn-assistant .preview-role { color: var(--assistant-label); }
+  .s-preview .preview-content {
+    font-size: 0.82rem; line-height: 1.6; color: var(--text);
+  }
+  .s-preview .preview-content p { margin: 4px 0; }
+  .s-preview .preview-content code {
+    font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.78rem;
+    background: var(--surface2); padding: 1px 5px; border-radius: 3px;
+  }
+  .s-preview .preview-content pre {
+    background: var(--surface2); padding: 10px 12px; border-radius: 6px;
+    overflow-x: auto; margin: 6px 0; font-size: 0.75rem;
+  }
+  .s-preview .preview-content pre code { background: none; padding: 0; }
+  .s-preview .preview-content strong { font-weight: 600; }
+  .s-preview .preview-content ul, .s-preview .preview-content ol { padding-left: 20px; margin: 4px 0; }
+  .s-preview .preview-loading { color: var(--text2); font-style: italic; padding: 16px 20px; }
   .rename-input {
     background: var(--surface2); border: 1px solid var(--accent); border-radius: 3px;
     color: var(--text); font-size: 0.78rem; padding: 1px 6px; width: 200px;
@@ -667,10 +721,10 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
   .setting-saved.show { opacity: 1; }
 
   @media (max-width: 700px) {
-    .session-row { grid-template-columns: 1fr 60px 50px; }
+    .session-row { grid-template-columns: 1fr 60px 50px 28px; }
     .s-project, .s-size { display: none; }
     .session-row.table-header { display: none; }
-    .group-sessions .session-row { grid-template-columns: 1fr 60px 50px; }
+    .group-sessions .session-row { grid-template-columns: 1fr 60px 50px 28px; }
   }
 </style>
 </head>
@@ -681,7 +735,9 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
   </div>
   <div class="top-nav">
     <a href="/" class="top-nav-tab active">Conversations</a>
+    <a href="/memory" class="top-nav-tab">Memory</a>
     <a href="/tools" class="top-nav-tab">Tools</a>
+    ${cfg.quick_launch_name ? `<a href="#" class="top-nav-tab" style="margin-left:auto;color:var(--green)" onclick="event.preventDefault();spawnQuick()">+ ${escapeHtml(cfg.quick_launch_name)}</a>` : ""}
   </div>
   <div class="controls">
     <input class="search" id="search" type="text" placeholder="Search or ask a question..." autofocus>
@@ -715,6 +771,23 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
           <div class="setting-row">
             <div class="setting-label">Show hidden sessions</div>
             <div class="setting-toggle" id="hiddenToggle" onclick="toggleShowHidden()"></div>
+          </div>
+        </div>
+        <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border)">
+          <div class="setting-row">
+            <div>
+              <div class="setting-label">Truncate session IDs</div>
+            </div>
+            <div class="setting-toggle" id="truncateToggle" onclick="toggleTruncate()"></div>
+          </div>
+          <div id="truncateOptions" style="display:none;margin-top:8px">
+            <div class="setting-row">
+              <div class="setting-label">Show</div>
+              <div style="display:flex;gap:4px">
+                <button class="view-btn truncate-opt" data-mode="first8" onclick="setTruncateMode('first8')" style="padding:4px 8px;font-size:0.75rem">First 8</button>
+                <button class="view-btn truncate-opt" data-mode="last8" onclick="setTruncateMode('last8')" style="padding:4px 8px;font-size:0.75rem">Last 8</button>
+              </div>
+            </div>
           </div>
         </div>
         <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border)">
@@ -880,6 +953,7 @@ function renderRecent(filtered) {
   html += '<span data-sort="last_modified" onclick="setSort(\\'last_modified\\')" class="' + (sortCol==='last_modified'?'sort-active':'') + '">When' + sortArrow('last_modified') + '</span>';
   html += '<span data-sort="turn_count" onclick="setSort(\\'turn_count\\')" style="text-align:right" class="' + (sortCol==='turn_count'?'sort-active':'') + '">Turns' + sortArrow('turn_count') + '</span>';
   html += '<span data-sort="file_size" onclick="setSort(\\'file_size\\')" style="text-align:right" class="' + (sortCol==='file_size'?'sort-active':'') + '">Size' + sortArrow('file_size') + '</span>';
+  html += '<span></span>';
   html += '</div>';
   for (const s of visible) {
     const proj = esc(s.project || s.dirProject || '—');
@@ -888,19 +962,24 @@ function renderRecent(filtered) {
     html += '<span class="s-project" title="' + esc(s.fullProject) + '">' + proj + '</span>';
     const titleBit = s.title ? '<span class="s-title">' + esc(s.title) + '</span>' : '';
     const ftsBit = s._ftsMatch ? '<span class="s-fts">' + s._ftsMatch + ' matches</span>' : '';
-    html += '<span class="s-session"><span class="s-id">' + s.id + '</span>' + titleBit + ftsBit;
-    html += '<span class="s-actions">';
-    if (SETTINGS.resume_enabled) {
-      html += '<button onclick="resumeSession(\\'' + s.id + '\\',event)" title="Resume in terminal" class="resume-btn">&#x25B6;</button>';
-    }
-    html += '<button onclick="copyResume(\\'' + s.id + '\\',event)" title="Copy --resume command" class="copy-btn">&#x2398;</button>';
-    html += '<button onclick="renameSession(\\'' + s.id + '\\',event)" title="Rename">✎</button>';
-    html += '<button onclick="hideSession(\\'' + s.id + '\\',event)" title="' + (s.hidden ? 'Unhide' : 'Hide') + '">' + (s.hidden ? '◉' : '◎') + '</button>';
-    html += '</span></span>';
+    html += '<span class="s-session"><span class="s-id" title="' + s.id + '">' + truncateId(s.id) + '</span>' + titleBit + ftsBit + '</span>';
     html += '<span class="s-time">' + fmtTime(s.last_modified) + '</span>';
     html += '<span class="s-turns">' + (s.turn_count || '—') + '</span>';
     html += '<span class="s-size">' + fmtSize(s.file_size) + '</span>';
+    html += '<span class="s-actions">';
+    html += '<button class="s-actions-trigger" onclick="toggleRowMenu(\\'' + s.id + '\\',event)">\\u22EE</button>';
+    html += '<div class="s-actions-menu" id="menu-' + s.id + '">';
+    if (SETTINGS.resume_enabled) {
+      html += '<button onclick="resumeSession(\\'' + s.id + '\\',event)"><span class="menu-icon">\\u25B6</span>Resume in terminal</button>';
+    }
+    html += '<button onclick="copyResume(\\'' + s.id + '\\',event)"><span class="menu-icon">\\u2398</span>Copy resume command</button>';
+    html += '<button onclick="renameSession(\\'' + s.id + '\\',event)"><span class="menu-icon">\\u270E</span>Rename</button>';
+    html += '<button onclick="previewSession(\\'' + s.id + '\\',event)"><span class="menu-icon">\\u25BC</span>Preview last turn</button>';
+    html += '<button onclick="hideSession(\\'' + s.id + '\\',event)"><span class="menu-icon">' + (s.hidden ? '\\u25C9' : '\\u25CE') + '</span>' + (s.hidden ? 'Unhide' : 'Hide') + '</button>';
+    html += '</div>';
+    html += '</span>';
     html += '</a>';
+    html += '<div class="s-preview" id="preview-' + s.id + '"></div>';
   }
   if (sorted.length > showCount) {
     html += '<button class="load-more" onclick="showCount+=' + 80 + ';render()">Show more (' + (sorted.length - showCount) + ' remaining)</button>';
@@ -936,7 +1015,7 @@ function renderByProject(filtered) {
       html += '<span class="s-project">' + esc(name) + '</span>';
       const titleBit = s.title ? '<span class="s-title">' + esc(s.title) + '</span>' : '';
       const ftsBit = s._ftsMatch ? '<span class="s-fts">' + s._ftsMatch + ' matches</span>' : '';
-      html += '<span class="s-session"><span class="s-id">' + s.id + '</span>' + titleBit + ftsBit;
+      html += '<span class="s-session"><span class="s-id" title="' + s.id + '">' + truncateId(s.id) + '</span>' + titleBit + ftsBit;
       html += '<span class="s-actions">';
       html += '<button onclick="renameSession(\\'' + s.id + '\\',event)" title="Rename">✎</button>';
       html += '<button onclick="hideSession(\\'' + s.id + '\\',event)" title="' + (s.hidden ? 'Unhide' : 'Hide') + '">' + (s.hidden ? '◉' : '◎') + '</button>';
@@ -1159,32 +1238,106 @@ function toggleShowHidden() {
   render();
 }
 
+function toggleRowMenu(id, e) {
+  e.preventDefault();
+  e.stopPropagation();
+  // Close any other open menus
+  document.querySelectorAll('.s-actions-menu.open').forEach(function(m) {
+    if (m.id !== 'menu-' + id) m.classList.remove('open');
+  });
+  var menu = document.getElementById('menu-' + id);
+  if (!menu) return;
+  var wasOpen = menu.classList.contains('open');
+  if (wasOpen) {
+    menu.classList.remove('open');
+  } else {
+    // Position the menu below the trigger
+    var trigger = e.target.closest('.s-actions-trigger') || e.target;
+    var rect = trigger.getBoundingClientRect();
+    menu.style.top = (rect.bottom + 4) + 'px';
+    menu.style.right = (window.innerWidth - rect.right) + 'px';
+    menu.style.left = 'auto';
+    menu.classList.add('open');
+  }
+}
+
+// Close menus when clicking outside
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.s-actions')) {
+    document.querySelectorAll('.s-actions-menu.open').forEach(function(m) { m.classList.remove('open'); });
+  }
+});
+
+function previewSession(id, e) {
+  e.preventDefault();
+  e.stopPropagation();
+  closeMenus();
+  var panel = document.getElementById('preview-' + id);
+  if (!panel) return;
+  if (panel.classList.contains('open')) {
+    panel.classList.remove('open');
+    panel.innerHTML = '';
+    return;
+  }
+  document.querySelectorAll('.s-preview.open').forEach(function(p) { p.classList.remove('open'); p.innerHTML = ''; });
+  panel.innerHTML = '<div class="preview-loading">Loading...</div>';
+  panel.classList.add('open');
+  fetch('/api/sessions/' + id + '/preview')
+    .then(function(r) { return r.text(); })
+    .then(function(html) { panel.innerHTML = html; })
+    .catch(function() { panel.innerHTML = '<div class="preview-loading">Failed to load</div>'; });
+}
+
+function closeMenus() {
+  document.querySelectorAll('.s-actions-menu.open').forEach(function(m) { m.classList.remove('open'); });
+}
+
 function copyResume(id, e) {
   e.preventDefault();
   e.stopPropagation();
+  closeMenus();
   navigator.clipboard.writeText('claude --resume ' + id).then(function() {
-    var btn = e.target.closest('.copy-btn') || e.target;
-    btn.textContent = '\\u2713';
-    setTimeout(function() { btn.innerHTML = '\\u2398'; }, 1200);
+    // Brief visual feedback not needed — menu is already closed
   });
 }
 
 function resumeSession(id, e) {
   e.preventDefault();
   e.stopPropagation();
-  var btn = e.target.closest('.resume-btn') || e.target;
-  btn.textContent = '\\u23F3';
+  closeMenus();
   fetch('/api/resume', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sessionId: id })
-  }).then(function(r) { return r.json(); }).then(function(data) {
-    btn.innerHTML = data.ok ? '\\u2713' : '\\u2716';
-    setTimeout(function() { btn.innerHTML = '\\u25B6'; }, 1500);
-  }).catch(function() {
-    btn.innerHTML = '\\u2716';
-    setTimeout(function() { btn.innerHTML = '\\u25B6'; }, 1500);
-  });
+  }).catch(function() {});
+}
+
+var truncateEnabled = localStorage.getItem('gloss_truncate_id') === '1';
+var truncateMode = localStorage.getItem('gloss_truncate_mode') || 'first8';
+
+function truncateId(id) {
+  if (!truncateEnabled || !id) return id;
+  if (truncateMode === 'last8') return '\\u2026' + id.slice(-8);
+  return id.slice(0, 8) + '\\u2026';
+}
+
+function toggleTruncate() {
+  truncateEnabled = !truncateEnabled;
+  localStorage.setItem('gloss_truncate_id', truncateEnabled ? '1' : '0');
+  document.getElementById('truncateToggle').classList.toggle('on', truncateEnabled);
+  document.getElementById('truncateOptions').style.display = truncateEnabled ? '' : 'none';
+  render();
+}
+
+function setTruncateMode(mode) {
+  truncateMode = mode;
+  localStorage.setItem('gloss_truncate_mode', mode);
+  document.querySelectorAll('.truncate-opt').forEach(function(b) { b.classList.toggle('active', b.dataset.mode === mode); });
+  render();
+}
+
+function spawnQuick() {
+  fetch('/api/spawn-quick', { method: 'POST' }).catch(function() {});
 }
 
 function toggleResume() {
@@ -1210,6 +1363,7 @@ function toggleDangerous() {
 function renameSession(id, e) {
   e.preventDefault();
   e.stopPropagation();
+  closeMenus();
   const row = e.target.closest('.session-row');
   if (!row) return;
   const sess = ALL.find(s => s.id === id);
@@ -1269,6 +1423,7 @@ function renameSession(id, e) {
 function hideSession(id, e) {
   e.preventDefault();
   e.stopPropagation();
+  closeMenus();
   const sess = ALL.find(s => s.id === id);
   const newHidden = sess && sess.hidden ? 0 : 1;
   fetch('/api/sessions/' + id + '/hidden', {
@@ -1294,6 +1449,12 @@ function initSettings() {
   toggle.classList.toggle('on', SETTINGS.embeddings_enabled);
   var hiddenToggle = document.getElementById('hiddenToggle');
   if (hiddenToggle) hiddenToggle.classList.toggle('on', showHidden);
+  // Truncate settings
+  var truncToggle = document.getElementById('truncateToggle');
+  if (truncToggle) truncToggle.classList.toggle('on', truncateEnabled);
+  var truncOpts = document.getElementById('truncateOptions');
+  if (truncOpts) truncOpts.style.display = truncateEnabled ? '' : 'none';
+  document.querySelectorAll('.truncate-opt').forEach(function(b) { b.classList.toggle('active', b.dataset.mode === truncateMode); });
   // Resume settings
   var resumeToggle = document.getElementById('resumeToggle');
   if (resumeToggle) resumeToggle.classList.toggle('on', SETTINGS.resume_enabled);
