@@ -637,6 +637,39 @@ describe("discovery", () => {
       expect(session.turn_count).toBe(2);
     });
 
+    it("backfillFtsIndex re-indexes when file content changes (mtime update)", () => {
+      const projectDir = path.join(tempDir, "proj");
+      const filePath = path.join(projectDir, "reindex.jsonl");
+      fs.mkdirSync(projectDir, { recursive: true });
+
+      // Initial content: searchable for "webpack"
+      fs.writeFileSync(filePath, [
+        JSON.stringify({ type: "user", message: { content: "How to configure webpack?" }, timestamp: "t0" }),
+        JSON.stringify({ type: "assistant", message: { content: "Use webpack.config.js" }, timestamp: "t1" }),
+      ].join("\n") + "\n", "utf-8");
+
+      db.upsertSession({ id: "reindex-test", jsonl_path: filePath });
+      backfillFtsIndex(db);
+
+      // Should find "webpack"
+      expect(db.searchSessions("webpack", 10).length).toBe(1);
+
+      // Overwrite with different content and bump mtime
+      fs.writeFileSync(filePath, [
+        JSON.stringify({ type: "user", message: { content: "How to configure vite?" }, timestamp: "t0" }),
+        JSON.stringify({ type: "assistant", message: { content: "Use vite.config.ts" }, timestamp: "t1" }),
+      ].join("\n") + "\n", "utf-8");
+      // Ensure mtime is newer (some filesystems have 1s granularity)
+      const futureTime = Date.now() / 1000 + 60;
+      fs.utimesSync(filePath, futureTime, futureTime);
+
+      backfillFtsIndex(db);
+
+      // After re-index: "webpack" should no longer match, "vite" should
+      expect(db.searchSessions("webpack", 10).length).toBe(0);
+      expect(db.searchSessions("vite", 10).length).toBe(1);
+    });
+
     it("updates path when re-syncing same session with new path", () => {
       syncToDb(db, [
         { id: "s1", path: "/old/path.jsonl", lastModified: Date.now(), fileSize: 100 },
