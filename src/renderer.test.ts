@@ -347,6 +347,28 @@ describe("renderToolResult", () => {
     expect(html).not.toMatch(/<script[\s>]/i);
     expect(html).not.toMatch(/<\/script>/i);
   });
+  it("escapes </pre> and </details> in thinking block content", () => {
+    // Thinking content is rendered inside <details><pre>...</pre></details>.
+    // Content with </pre> or </details> could break the HTML structure if not escaped.
+    const turn: Turn = {
+      role: "assistant",
+      blocks: [
+        {
+          type: "thinking",
+          text: 'Let me check: </pre><img src=x onerror=alert(1)></details><script>alert("xss")</script>',
+        },
+        { type: "text", text: "Here's my answer" },
+      ],
+    };
+    const { html } = renderTurn(turn, 0, true, true);
+    // Must NOT contain raw </pre>, </details>, or <script>
+    expect(html).not.toContain("</pre><img");
+    expect(html).not.toContain("</details><script");
+    expect(html).not.toMatch(/<script[\s>]/i);
+    // The thinking content should be escaped
+    expect(html).toContain("&lt;/pre&gt;");
+    expect(html).toContain("&lt;/details&gt;");
+  });
 });
 
 // ---------------------------------------------------------------------------
