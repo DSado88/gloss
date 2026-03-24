@@ -564,6 +564,37 @@ describe("server routes", () => {
     });
   });
 
+  it("GET /api/settings returns all writeable settings including resume and terminal", async () => {
+    // PATCH can write resume_enabled, terminal_app, resume_dangerous_mode.
+    // GET must return them too — otherwise clients can't read back what they wrote.
+    await fetch(`${baseUrl}/api/settings`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        resume_enabled: true,
+        terminal_app: "iTerm",
+        resume_dangerous_mode: true,
+      }),
+    });
+
+    const getRes = await fetch(`${baseUrl}/api/settings`);
+    const data = await getRes.json() as any;
+    expect(data.resume_enabled).toBe(true);
+    expect(data.terminal_app).toBe("iTerm");
+    expect(data.resume_dangerous_mode).toBe(true);
+
+    // Reset
+    await fetch(`${baseUrl}/api/settings`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        resume_enabled: false,
+        terminal_app: "Terminal",
+        resume_dangerous_mode: false,
+      }),
+    });
+  });
+
   // -----------------------------------------------------------------------
   // Title + Hidden API
   // -----------------------------------------------------------------------

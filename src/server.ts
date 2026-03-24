@@ -1216,6 +1216,9 @@ async function handleApiRouteInner(
     const settings = {
       embeddings_enabled: db.getSetting("embeddings_enabled") === "1",
       min_turns: parseInt(db.getSetting("min_turns") ?? "0", 10),
+      resume_enabled: db.getSetting("resume_enabled") === "1",
+      terminal_app: db.getSetting("terminal_app") || "Terminal",
+      resume_dangerous_mode: db.getSetting("resume_dangerous_mode") === "1",
     };
     return new Response(JSON.stringify(settings), { headers: jsonHeaders });
   }
