@@ -78,7 +78,7 @@ export class IncrementalParser {
 
       if (typeof content === "string" && content.trim()) {
         if (msgType === "user") {
-          const cmdMatch = content.match(/<command-name>\s*(\/[\w-]+)\s*<\/command-name>/);
+          const cmdMatch = content.match(/<command-name>\s*(\/[\w:-]+)\s*<\/command-name>/);
           const cmdArgsMatch = content.match(/<command-args>\s*([\s\S]*?)\s*<\/command-args>/);
 
           if (isSystemNoise(content)) {
@@ -117,7 +117,7 @@ export class IncrementalParser {
               if (msgType === "user") {
                 if (isSystemNoise(text)) {
                   // Mirror the string-content path: detect slash commands and session continuations inside noise
-                  const cmdMatch = text.match(/<command-name>\s*(\/[\w-]+)\s*<\/command-name>/);
+                  const cmdMatch = text.match(/<command-name>\s*(\/[\w:-]+)\s*<\/command-name>/);
                   if (cmdMatch) {
                     const cmdArgsMatch = text.match(/<command-args>\s*([\s\S]*?)\s*<\/command-args>/);
                     const cmd = cmdMatch[1];

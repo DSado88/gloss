@@ -259,6 +259,25 @@ describe("buildConversation", () => {
     });
   });
 
+  it("detects namespaced slash commands with colons (e.g. /gloss:search)", () => {
+    // Skill-namespaced commands use colons: /gloss:search, /squall:review, etc.
+    // Bug: the command-name regex \/[\w-]+ didn't include : so these were
+    // treated as system noise and dropped entirely from the conversation.
+    const file = createJsonl([
+      {
+        type: "user",
+        message: { content: "<command-name>/gloss:search</command-name><command-args>find bugs</command-args>" },
+        timestamp: "t1",
+      },
+    ]);
+    const conv = buildConversation(file);
+    expect(conv.turns).toHaveLength(1);
+    expect(conv.turns[0].blocks[0]).toEqual({
+      type: "slash_command",
+      command: "/gloss:search find bugs",
+    });
+  });
+
   it("detects slash command without args", () => {
     const file = createJsonl([
       {
