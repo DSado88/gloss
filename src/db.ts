@@ -19,6 +19,10 @@ export interface SessionRecord {
   last_modified?: number | null;
   file_size?: number | null;
   hidden?: number | null;
+  summary?: string | null;
+  summary_source_mtime?: number | null;
+  summary_status?: string | null;
+  summary_error?: string | null;
 }
 
 export interface AnnotationRecord {
@@ -243,6 +247,38 @@ export class ConvoDb {
   getSession(id: string): SessionRecord | null {
     const row = this.db.query("SELECT * FROM sessions WHERE id = ?").get(id) as SessionRecord | null;
     return row ?? null;
+  }
+
+  /** Mark summary as generating (prevents duplicate spawns at DB level). */
+  setSummaryGenerating(id: string): void {
+    this.db.run(
+      "UPDATE sessions SET summary_status = 'generating', summary_error = NULL WHERE id = ?",
+      [id],
+    );
+  }
+
+  /** Store a completed summary with the source file mtime for freshness checking. */
+  setSummaryDone(id: string, summary: string, sourceMtime: number): void {
+    this.db.run(
+      "UPDATE sessions SET summary = ?, summary_source_mtime = ?, summary_status = 'done', summary_error = NULL WHERE id = ?",
+      [summary, sourceMtime, id],
+    );
+  }
+
+  /** Store a summary error. */
+  setSummaryError(id: string, error: string): void {
+    this.db.run(
+      "UPDATE sessions SET summary_status = 'error', summary_error = ? WHERE id = ?",
+      [error, id],
+    );
+  }
+
+  /** Clear summary when source file has changed. */
+  clearSummary(id: string): void {
+    this.db.run(
+      "UPDATE sessions SET summary = NULL, summary_source_mtime = NULL, summary_status = 'idle', summary_error = NULL WHERE id = ?",
+      [id],
+    );
   }
 
   listSessions(opts?: { project?: string; limit?: number; offset?: number; includeHidden?: boolean }): SessionRecord[] {
@@ -846,6 +882,10 @@ export function openDb(dbPath?: string): ConvoDb {
   try { db.exec("ALTER TABLE sessions ADD COLUMN file_size INTEGER"); } catch {}
   try { db.exec("ALTER TABLE fts_status ADD COLUMN file_mtime INTEGER NOT NULL DEFAULT 0"); } catch {}
   try { db.exec("ALTER TABLE sessions ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0"); } catch {}
+  try { db.exec("ALTER TABLE sessions ADD COLUMN summary TEXT"); } catch {}
+  try { db.exec("ALTER TABLE sessions ADD COLUMN summary_source_mtime INTEGER"); } catch {}
+  try { db.exec("ALTER TABLE sessions ADD COLUMN summary_status TEXT DEFAULT 'idle'"); } catch {}
+  try { db.exec("ALTER TABLE sessions ADD COLUMN summary_error TEXT"); } catch {}
 
   // Migrate FTS to contentless_delete=1 if needed (fixes ghost entry bug)
   try {

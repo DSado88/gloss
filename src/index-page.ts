@@ -975,6 +975,7 @@ function renderRecent(filtered) {
     html += '<button onclick="copyResume(\\'' + s.id + '\\',event)"><span class="menu-icon">\\u2398</span>Copy resume command</button>';
     html += '<button onclick="renameSession(\\'' + s.id + '\\',event)"><span class="menu-icon">\\u270E</span>Rename</button>';
     html += '<button onclick="previewSession(\\'' + s.id + '\\',event)" id="preview-btn-' + s.id + '"><span class="menu-icon">\\u25BC</span>Preview last turn</button>';
+    html += '<button onclick="summarizeSession(\\'' + s.id + '\\',event)"><span class="menu-icon">\\u2211</span>Summarize</button>';
     html += '<button onclick="hideSession(\\'' + s.id + '\\',event)"><span class="menu-icon">' + (s.hidden ? '\\u25C9' : '\\u25CE') + '</span>' + (s.hidden ? 'Unhide' : 'Hide') + '</button>';
     html += '</div>';
     html += '</span>';
@@ -1296,6 +1297,70 @@ function previewSession(id, e) {
     .then(function(r) { return r.text(); })
     .then(function(html) { panel.innerHTML = html; })
     .catch(function() { panel.innerHTML = '<div class="preview-loading">Failed to load</div>'; });
+}
+
+function summarizeSession(id, e) {
+  e.preventDefault();
+  e.stopPropagation();
+  closeMenus();
+  var panel = document.getElementById('preview-' + id);
+  if (!panel) return;
+  // Close other previews
+  document.querySelectorAll('.s-preview.open').forEach(function(p) { p.classList.remove('open'); p.innerHTML = ''; });
+  panel.innerHTML = '<div class="preview-loading">Generating summary...</div>';
+  panel.classList.add('open');
+  // POST to trigger generation
+  fetch('/api/sessions/' + id + '/summary', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status === 'done') {
+        panel.innerHTML = '<div class="preview-turn"><div class="preview-role">Summary</div><div class="preview-content">' + data.summary + '</div></div>';
+        // Also update the title in the row if it has no title
+        var row = document.querySelector('a[href="/c/' + id + '"]');
+        if (row && !row.querySelector('.s-title')) {
+          var sessionSpan = row.querySelector('.s-session');
+          if (sessionSpan) {
+            var titleSpan = document.createElement('span');
+            titleSpan.className = 's-title';
+            titleSpan.textContent = data.summary.length > 60 ? data.summary.substring(0, 60) + '...' : data.summary;
+            sessionSpan.appendChild(titleSpan);
+          }
+        }
+      } else if (data.status === 'generating') {
+        // Poll until done
+        pollSummary(id, panel);
+      } else if (data.status === 'error') {
+        panel.innerHTML = '<div class="preview-loading">Error: ' + (data.error || 'Unknown error') + '</div>';
+      }
+    })
+    .catch(function() { panel.innerHTML = '<div class="preview-loading">Failed to generate summary</div>'; });
+}
+
+function pollSummary(id, panel) {
+  setTimeout(function() {
+    fetch('/api/sessions/' + id + '/summary')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.status === 'done') {
+          panel.innerHTML = '<div class="preview-turn"><div class="preview-role">Summary</div><div class="preview-content">' + data.summary + '</div></div>';
+          var row = document.querySelector('a[href="/c/' + id + '"]');
+          if (row && !row.querySelector('.s-title')) {
+            var sessionSpan = row.querySelector('.s-session');
+            if (sessionSpan) {
+              var titleSpan = document.createElement('span');
+              titleSpan.className = 's-title';
+              titleSpan.textContent = data.summary.length > 60 ? data.summary.substring(0, 60) + '...' : data.summary;
+              sessionSpan.appendChild(titleSpan);
+            }
+          }
+        } else if (data.status === 'generating') {
+          pollSummary(id, panel);
+        } else {
+          panel.innerHTML = '<div class="preview-loading">Error: ' + (data.error || 'Failed') + '</div>';
+        }
+      })
+      .catch(function() { panel.innerHTML = '<div class="preview-loading">Failed to check status</div>'; });
+  }, 2000);
 }
 
 function closeMenus() {

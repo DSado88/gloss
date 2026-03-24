@@ -561,6 +561,25 @@ export async function startServer(options: { port?: number } = {}): Promise<void
         }
       }
 
+      // Summary — GET reads status, POST triggers generation
+      if (pathname.match(/^\/api\/sessions\/([^/]+)\/summary$/) && (req.method === "GET" || req.method === "POST")) {
+        const sessionId = pathname.split("/")[3];
+        const { getSummary, generateSummary } = await import("./summary.js");
+        if (req.method === "GET") {
+          const result = getSummary(db, sessionId);
+          return new Response(JSON.stringify(result), {
+            headers: { "Content-Type": "application/json" },
+          });
+        } else {
+          const result = await generateSummary(db, sessionId);
+          const status = result.status === "generating" ? 202 : 200;
+          return new Response(JSON.stringify(result), {
+            status,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+      }
+
       // Folder picker — opens native Finder dialog
       if (pathname === "/api/pick-folder" && req.method === "POST") {
         try {
