@@ -297,7 +297,7 @@ export function decodeProjectDir(encoded: string): string {
   // e.g. "private-tmp-ori-orchid-work-bidi-1771993919-746449" → "ori/orchid-bidi"
   // e.g. "private-tmp-ori-orchid-work-streaming-01KHSTXMG..." → "ori/orchid-streaming"
   const tmpMatch = stripped.match(
-    /^private-(?:tmp|var-folders-[^-]+-[^-]+-[^-]+-[^-]+-T)-ori-orchid-(?:work-)?(\w+?)[-_](?:\d{10,}|01[0-9A-Z]{20,})/,
+    /^private-(?:tmp|var-folders-[^-]+-[^-]+-T)-ori-orchid-(?:work-)?(\w+?)[-_](?:\d{10,}|01[0-9A-Z]{20,})/,
   );
   if (tmpMatch) return "ori/orchid-" + tmpMatch[1];
   // Other /private/tmp or /var paths — just show last meaningful segment

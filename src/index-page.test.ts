@@ -255,6 +255,19 @@ describe("deriveProjectNames", () => {
     expect(result.project).toBe("ori/orchid-bidi");
   });
 
+  it("decodes ori/orchid var-folders paths (macOS /var/folders/XX/HASH/T/)", () => {
+    // macOS /var/folders/ has 2 segments (XX, HASH) between "folders" and "T",
+    // not 4. The encoded form is:
+    //   -private-var-folders-<2char>-<hash>-T-ori-orchid-work-<project>-<timestamp>
+    // Must produce "ori/orchid-<project>", not the full hash.
+    const result = deriveProjectNames(
+      null,
+      "/Users/test/.claude/projects/-private-var-folders-6n-pxfdftt92gz067tt08tf1k6m0000gn-T-ori-orchid-work-bidi-1771993919-746449/session.jsonl",
+    );
+    expect(result.dirProject).toBe("ori/orchid-bidi");
+    expect(result.project).toBe("ori/orchid-bidi");
+  });
+
   it("handles Linux-style /home/ paths in dirProject (no crash, reasonable fallback)", () => {
     // decodeProjectDir only handles Users- prefixes (macOS). Linux paths
     // like -home-user-project should fall through without crashing, returning
