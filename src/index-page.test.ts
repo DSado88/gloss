@@ -224,6 +224,14 @@ describe("deriveProjectNames", () => {
     expect(result.project).toBe("real-project");
   });
 
+  it("keeps project name that starts with digits but has non-digit suffix", () => {
+    // A project named "1704067200-myproject" starts with 10+ digits but
+    // is NOT a timestamp — it has a non-digit suffix. The timestamp regex
+    // must use a $ anchor to avoid falsely matching this.
+    const result = deriveProjectNames("/home/user/1704067200-myproject", null);
+    expect(result.project).toBe("1704067200-myproject");
+  });
+
   it("returns empty strings for null inputs", () => {
     const result = deriveProjectNames(null, null);
     expect(result.project).toBe("");

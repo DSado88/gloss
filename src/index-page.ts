@@ -340,7 +340,7 @@ export function deriveProjectNames(rawProject: string | null | undefined, jsonlP
   const parts = project.replace(/\/+$/, "").split("/");
   let shortProject = parts.length >= 1 ? parts[parts.length - 1] : "";
   // If shortProject looks like a KSUID, timestamp, or hash, prefer dirProject
-  if (/^01[0-9A-Z]{10,}$/.test(shortProject) || /^\d{10,}/.test(shortProject) || /^[0-9a-f]{16,}$/i.test(shortProject)) {
+  if (/^01[0-9A-Z]{10,}$/.test(shortProject) || /^\d{10,}$/.test(shortProject) || /^[0-9a-f]{16,}$/i.test(shortProject)) {
     shortProject = "";
   }
   return {
