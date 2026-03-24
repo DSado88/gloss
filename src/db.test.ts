@@ -937,6 +937,69 @@ describe("ConvoDb", () => {
   });
 
   // -----------------------------------------------------------------------
+  // Summary lifecycle
+  // -----------------------------------------------------------------------
+
+  describe("summary lifecycle", () => {
+    it("full lifecycle: idle → generating → done → idle (clear)", () => {
+      db.upsertSession({ id: "sum-1" });
+
+      // Initial state — summary columns default to NULL/idle
+      let s = db.getSession("sum-1")!;
+      expect(s.summary).toBeNull();
+      expect(s.summary_status).toBe("idle");
+
+      // Mark generating
+      db.setSummaryGenerating("sum-1");
+      s = db.getSession("sum-1")!;
+      expect(s.summary_status).toBe("generating");
+      expect(s.summary_error).toBeNull();
+
+      // Complete with summary
+      db.setSummaryDone("sum-1", "This is a summary.", 1234567890);
+      s = db.getSession("sum-1")!;
+      expect(s.summary_status).toBe("done");
+      expect(s.summary).toBe("This is a summary.");
+      expect(s.summary_source_mtime).toBe(1234567890);
+      expect(s.summary_error).toBeNull();
+
+      // Clear resets everything
+      db.clearSummary("sum-1");
+      s = db.getSession("sum-1")!;
+      expect(s.summary_status).toBe("idle");
+      expect(s.summary).toBeNull();
+      expect(s.summary_source_mtime).toBeNull();
+      expect(s.summary_error).toBeNull();
+    });
+
+    it("setSummaryError stores error and preserves existing summary", () => {
+      db.upsertSession({ id: "sum-err" });
+      db.setSummaryDone("sum-err", "Old summary", 100);
+
+      // Error during re-generation should preserve old summary text
+      db.setSummaryGenerating("sum-err");
+      db.setSummaryError("sum-err", "Haiku process timed out");
+
+      const s = db.getSession("sum-err")!;
+      expect(s.summary_status).toBe("error");
+      expect(s.summary_error).toBe("Haiku process timed out");
+      // Old summary text should still be there
+      expect(s.summary).toBe("Old summary");
+    });
+
+    it("setSummaryDone clears any previous error", () => {
+      db.upsertSession({ id: "sum-recover" });
+      db.setSummaryError("sum-recover", "previous failure");
+
+      db.setSummaryDone("sum-recover", "Recovered summary", 200);
+      const s = db.getSession("sum-recover")!;
+      expect(s.summary_status).toBe("done");
+      expect(s.summary_error).toBeNull();
+      expect(s.summary).toBe("Recovered summary");
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Embeddings CRUD
   // -----------------------------------------------------------------------
 
