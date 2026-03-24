@@ -565,4 +565,14 @@ describe("renderMarkdownInline", () => {
     expect(html).toContain("<td>a</td>");
     expect(html).toContain("<td>b</td>");
   });
+
+  it("unmatched backticks in different cells do not pair across cell boundaries", () => {
+    // If cell A has `foo and cell B has bar`, the backticks must NOT be
+    // paired — that would swallow inter-cell HTML into a <code> span.
+    const md = "| col `A | col B` |\n|--------|--------|\n| x | y |";
+    const html = renderMarkdownInline(md);
+    // Both header cells must appear as separate <th> elements
+    const thCount = (html.match(/<th>/g) || []).length;
+    expect(thCount).toBe(2);
+  });
 });

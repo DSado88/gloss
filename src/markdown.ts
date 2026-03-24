@@ -258,7 +258,9 @@ export function renderMarkdownInline(text: string): string {
 
     for (const piece of tableSplit) {
       if (piece.startsWith("<table>")) {
-        partPieces.push(applyTableInlineFormatting(piece));
+        // Table cells are already formatted by renderMdTable (escape + applyInlineFormatting).
+        // Pass through as-is to avoid cross-cell backtick/formatting contamination.
+        partPieces.push(piece);
       } else {
         partPieces.push(applyInlineFormatting(escape(piece)));
       }
