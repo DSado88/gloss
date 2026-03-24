@@ -280,4 +280,39 @@ describe("IncrementalParser — live update scenarios", () => {
       expect(turn.blocks.length).toBeGreaterThan(0);
     }
   });
+
+  it("merges consecutive same-role assistant messages across feedLines calls", () => {
+    const parser = new IncrementalParser();
+
+    parser.feedLines([
+      makeSummaryLine(),
+      makeUserLine("Hello"),
+    ]);
+    expect(parser.getTurns().length).toBe(1); // user
+
+    // First assistant message
+    parser.feedLines([makeAssistantLine("Part 1")]);
+    expect(parser.getTurns().length).toBe(2); // user + assistant
+
+    // Second assistant message arrives in next feedLines — should merge, not create new turn
+    const updates = parser.feedLines([makeAssistantLine("Part 2")]);
+    expect(parser.getTurns().length).toBe(2); // still 2 — merged into existing assistant turn
+    expect(updates.length).toBe(1);
+    expect(updates[0].type).toBe("update_turn");
+    expect(updates[0].turnIndex).toBe(1); // the assistant turn at index 1
+
+    // The merged turn should have both text blocks
+    const assistantTurn = parser.getTurns()[1];
+    const textBlocks = assistantTurn.blocks.filter(b => b.type === "text");
+    expect(textBlocks.length).toBe(2);
+  });
+
+  it("extracts version metadata from summary line", () => {
+    const parser = new IncrementalParser();
+    parser.feedLines([
+      JSON.stringify({ type: "summary", sessionId: "v-test", cwd: "/test", version: "2.5.0" }),
+    ]);
+    const meta = parser.getMetadata();
+    expect(meta.version).toBe("2.5.0");
+  });
 });
