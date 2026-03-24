@@ -869,6 +869,42 @@ describe("ConvoDb", () => {
   });
 
   // -----------------------------------------------------------------------
+  // FTS: special character handling in searchSessions / searchConversations
+  // -----------------------------------------------------------------------
+
+  describe("FTS special character handling", () => {
+    it("searchSessions handles FTS5 special characters without throwing", () => {
+      // searchAnnotations sanitizes these, but searchSessions/searchConversations
+      // pass raw queries to FTS5 MATCH — must not throw on special chars
+      expect(() => db.searchSessions('"unclosed quote', 10)).not.toThrow();
+      expect(() => db.searchSessions("(unmatched", 10)).not.toThrow();
+      expect(() => db.searchSessions("OR AND NOT", 10)).not.toThrow();
+      expect(() => db.searchSessions("hello*world", 10)).not.toThrow();
+      expect(() => db.searchSessions("NEAR(a b)", 10)).not.toThrow();
+      expect(() => db.searchSessions("{braces}", 10)).not.toThrow();
+    });
+
+    it("searchConversations handles FTS5 special characters without throwing", () => {
+      expect(() => db.searchConversations('"unclosed quote', 10)).not.toThrow();
+      expect(() => db.searchConversations("(unmatched", 10)).not.toThrow();
+      expect(() => db.searchConversations("OR AND NOT", 10)).not.toThrow();
+      expect(() => db.searchConversations("hello*world", 10)).not.toThrow();
+    });
+
+    it("searchSessions still finds results after sanitizing special chars", () => {
+      db.upsertSession({ id: "fts-special" });
+      db.indexSession("fts-special", [
+        { role: "user", text: "unique_fts_sanitize_test_xqz" },
+      ], 100);
+
+      // Query with special chars mixed into valid terms should still match
+      const results = db.searchSessions('"unique_fts_sanitize_test_xqz"', 10);
+      expect(results.length).toBe(1);
+      expect(results[0].session_id).toBe("fts-special");
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Bug #5: FTS ghost entries via broken contentless delete
   // -----------------------------------------------------------------------
 

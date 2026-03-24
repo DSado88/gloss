@@ -498,12 +498,13 @@ describe("server routes", () => {
     expect(Array.isArray(data.results)).toBe(true);
   });
 
-  it("GET /api/search with FTS-invalid query returns error gracefully", async () => {
+  it("GET /api/search with FTS-special-char query returns results without crashing", async () => {
+    // FTS5 special chars are now sanitized by searchSessions, so this
+    // returns empty results gracefully instead of throwing
     const res = await fetch(`${baseUrl}/api/search?q=${encodeURIComponent('"unclosed')}`);
     expect(res.status).toBe(200);
     const data = await res.json() as any;
     expect(data.results).toEqual([]);
-    expect(data.error).toBeDefined();
   });
 
   // -----------------------------------------------------------------------

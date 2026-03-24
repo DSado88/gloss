@@ -431,6 +431,16 @@ export class ConvoDb {
 
   // ---- Search -------------------------------------------------------------
 
+  /** Sanitize a query string for FTS5 MATCH — strips operators and special chars. */
+  private sanitizeFtsQuery(query: string): string {
+    return query
+      .replace(/[":*^~(){}[\]<>+\-!|&\\/]/g, " ")
+      .split(/\s+/)
+      .filter((t) => t.length > 0 && !/^(AND|OR|NOT|NEAR)$/i.test(t))
+      .join(" ")
+      .trim();
+  }
+
   searchAnnotations(
     query: string,
     opts?: { tags?: string[]; sessionId?: string; speaker?: string; limit?: number },
@@ -440,12 +450,7 @@ export class ConvoDb {
 
     // FTS match — sanitize special chars to prevent FTS5 syntax errors
     if (query) {
-      const safeQuery = query
-        .replace(/[":*^~(){}[\]<>+\-!|&\\/]/g, " ")
-        .split(/\s+/)
-        .filter((t) => t.length > 0 && !/^(AND|OR|NOT|NEAR)$/i.test(t))
-        .join(" ")
-        .trim();
+      const safeQuery = this.sanitizeFtsQuery(query);
       if (safeQuery) {
         clauses.push("a.rowid IN (SELECT rowid FROM annotations_fts WHERE annotations_fts MATCH ?)");
         params.push(safeQuery);
@@ -666,8 +671,8 @@ export class ConvoDb {
     role: string;
     rank: number;
   }> {
-    if (!query.trim()) return [];
-    // FTS5 query — wrap in double quotes for phrase, or pass as-is for boolean
+    const safeQuery = this.sanitizeFtsQuery(query);
+    if (!safeQuery) return [];
     const rows = this.db.query(`
       SELECT m.session_id, m.turn_index, m.role, f.rank
       FROM conversation_fts f
@@ -675,7 +680,7 @@ export class ConvoDb {
       WHERE conversation_fts MATCH ?
       ORDER BY f.rank
       LIMIT ?
-    `).all(query, limit) as Array<{
+    `).all(safeQuery, limit) as Array<{
       session_id: string;
       turn_index: number;
       role: string;
@@ -690,7 +695,8 @@ export class ConvoDb {
     match_count: number;
     best_rank: number;
   }> {
-    if (!query.trim()) return [];
+    const safeQuery = this.sanitizeFtsQuery(query);
+    if (!safeQuery) return [];
     const rows = this.db.query(`
       SELECT m.session_id, COUNT(*) as match_count, MIN(f.rank) as best_rank
       FROM conversation_fts f
@@ -699,7 +705,7 @@ export class ConvoDb {
       GROUP BY m.session_id
       ORDER BY best_rank
       LIMIT ?
-    `).all(query, limit) as Array<{
+    `).all(safeQuery, limit) as Array<{
       session_id: string;
       match_count: number;
       best_rank: number;
