@@ -111,4 +111,22 @@ describe("isSystemNoise", () => {
   it("returns true for whitespace-only string", () => {
     expect(isSystemNoise("   \n\n  ")).toBe(true);
   });
+
+  it("returns false when system prefix appears mid-text (not at start)", () => {
+    // SYSTEM_ONLY_PREFIXES should only match at the START of cleaned text.
+    // If the prefix string appears in the middle, it's real user content.
+    expect(
+      isSystemNoise("Please explain: Base directory for this skill: /home/user")
+    ).toBe(false);
+    expect(
+      isSystemNoise("Question about: This session is being continued from a previous conversation")
+    ).toBe(false);
+  });
+
+  it("returns true for system prefix with leading whitespace (trimmed)", () => {
+    // cleanUserText trims whitespace, so leading spaces shouldn't prevent detection
+    expect(
+      isSystemNoise("   Base directory for this skill: /home/user/project")
+    ).toBe(true);
+  });
 });
