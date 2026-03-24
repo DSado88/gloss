@@ -206,6 +206,21 @@ describe("server routes", () => {
     expect(res.status).toBe(404);
   });
 
+  it("GET /c/ with path traversal attempt returns 404, not file contents", async () => {
+    // Session IDs are DB keys, not file paths. Path traversal in the
+    // session ID should match no DB record → 404.
+    const traversalAttempts = [
+      "../../../etc/passwd",
+      "..%2F..%2F..%2Fetc%2Fpasswd",
+      "../../src/server.ts",
+      "%2e%2e%2f%2e%2e%2f",
+    ];
+    for (const attempt of traversalAttempts) {
+      const res = await fetch(`${baseUrl}/c/${attempt}`);
+      expect(res.status).toBe(404);
+    }
+  });
+
   it("conversation page uses external assets (server mode)", async () => {
     const body = await (await fetch(`${baseUrl}/c/${SESSION_ID}`)).text();
     expect(body).toContain('href="/assets/style.css"');
