@@ -49,8 +49,13 @@ export function getSummary(db: ConvoDb, sessionId: string): SummaryResult {
     }
   }
 
+  // Guard against inconsistent state: status="done" but no summary text
+  const status = session.summary_status === "done" && !session.summary
+    ? "idle"
+    : (session.summary_status as SummaryResult["status"]) ?? "idle";
+
   return {
-    status: (session.summary_status as SummaryResult["status"]) ?? "idle",
+    status,
     summary: session.summary,
     error: session.summary_error,
     cached: false,

@@ -344,6 +344,30 @@ describe("getSummary", () => {
     expect(result.cached).toBe(false);
   });
 
+  it("treats done status with null summary as idle (inconsistent DB state)", () => {
+    // Edge case: summary_status is "done" but summary text is null.
+    // This can happen if the DB is manually edited or a migration goes wrong.
+    // getSummary should NOT return status:"done" with a null summary —
+    // that misleads clients into thinking the summary is complete.
+    const f = makeJsonl(dir, "done-null", [
+      { role: "user", text: "question" },
+      { role: "assistant", text: "answer" },
+    ]);
+    const mtime = Math.floor(fs.statSync(f).mtimeMs);
+    db.upsertSession({ id: "done-null", jsonl_path: f });
+    // Simulate inconsistent state: done but no summary text
+    db.db.run(
+      "UPDATE sessions SET summary_status = 'done', summary = NULL, summary_source_mtime = ? WHERE id = ?",
+      [mtime, "done-null"],
+    );
+
+    const result = getSummary(db, "done-null");
+    // Should NOT be "done" — there's no actual summary to show
+    expect(result.status).not.toBe("done");
+    // Should be "idle" so the client knows to regenerate
+    expect(result.status).toBe("idle");
+  });
+
   it("returns error when session exists but has no jsonl_path", () => {
     // Sessions created before discovery may have no jsonl_path
     db.upsertSession({ id: "no-path" });
