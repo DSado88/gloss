@@ -606,6 +606,31 @@ describe("server routes", () => {
     });
   });
 
+  it("PATCH /api/settings with Infinity min_turns does not corrupt setting", async () => {
+    // Bug: JSON.parse('{"min_turns":1e309}') produces {min_turns: Infinity}.
+    // Number(Infinity) → Infinity, String(Infinity) → "Infinity",
+    // then parseInt("Infinity") → NaN, JSON.stringify({min_turns: NaN}) → null.
+    // The setting must be clamped to a finite integer, not stored as "Infinity".
+    // Send raw JSON (not JSON.stringify which converts Infinity to null).
+    await fetch(`${baseUrl}/api/settings`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: '{"min_turns":1e309}',
+    });
+
+    const res = await fetch(`${baseUrl}/api/settings`);
+    const data = await res.json() as any;
+    expect(typeof data.min_turns).toBe("number");
+    expect(Number.isFinite(data.min_turns)).toBe(true);
+
+    // Reset
+    await fetch(`${baseUrl}/api/settings`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ min_turns: 0 }),
+    });
+  });
+
   // -----------------------------------------------------------------------
   // Title + Hidden API
   // -----------------------------------------------------------------------

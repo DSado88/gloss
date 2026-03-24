@@ -1230,7 +1230,8 @@ async function handleApiRouteInner(
       db.setSetting("embeddings_enabled", body.embeddings_enabled ? "1" : "0");
     }
     if ("min_turns" in body) {
-      db.setSetting("min_turns", String(Math.max(0, Number(body.min_turns) || 0)));
+      const raw = Number(body.min_turns);
+      db.setSetting("min_turns", String(Math.max(0, Number.isFinite(raw) ? raw : 0)));
     }
     if ("resume_enabled" in body) {
       db.setSetting("resume_enabled", body.resume_enabled ? "1" : "0");
