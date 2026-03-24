@@ -953,9 +953,10 @@ async function handleApiRouteInner(
       kind: (body.kind as string) ?? "highlight",
       speaker: (body.speaker as string) ?? null,
     });
-    // Replace tags atomically
+    // Replace tags atomically — filter to non-empty strings to prevent NOT NULL crash
     if (Array.isArray(body.tags)) {
-      db.replaceAnnotationTags(body.id as string, body.tags as string[]);
+      const safeTags = (body.tags as unknown[]).filter((t): t is string => typeof t === "string" && t.length > 0);
+      db.replaceAnnotationTags(body.id as string, safeTags);
     }
     // Broadcast to other WS clients on this session
     invalidatePageCache(sessionId);
@@ -989,7 +990,8 @@ async function handleApiRouteInner(
       speaker: (body.speaker as string) ?? null,
     });
     if (Array.isArray(body.tags)) {
-      db.replaceAnnotationTags(annId, body.tags as string[]);
+      const safeTags = (body.tags as unknown[]).filter((t): t is string => typeof t === "string" && t.length > 0);
+      db.replaceAnnotationTags(annId, safeTags);
     }
     invalidatePageCache(sessionId);
     broadcastAnnotationSync(sessionId);

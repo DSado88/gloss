@@ -437,6 +437,38 @@ describe("server routes", () => {
     expect(res.status).toBe(400);
   });
 
+  it("POST annotation with null in tags array does not crash (returns 200)", async () => {
+    // Bug: tags array like ["valid", null, 42] passed to replaceAnnotationTags
+    // which calls addTag(id, null) → SQLite NOT NULL constraint on tags.name → 500.
+    // The server should filter non-string tag values, not crash.
+    const res = await fetch(`${baseUrl}/api/sessions/${SESSION_ID}/annotations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: "ann-null-tag",
+        turnIndex: 0,
+        charStart: 0,
+        charEnd: 5,
+        text: "test",
+        tags: ["valid-tag", null, 42, "", "another-tag"],
+      }),
+    });
+    expect(res.status).toBe(200);
+
+    // Verify only valid non-empty string tags were stored
+    const getRes = await fetch(`${baseUrl}/api/sessions/${SESSION_ID}/annotations`);
+    const data = await getRes.json() as any[];
+    const ann = data.find((a: any) => a.id === "ann-null-tag");
+    expect(ann).toBeDefined();
+    expect(ann.tags).toContain("valid-tag");
+    expect(ann.tags).toContain("another-tag");
+    expect(ann.tags).not.toContain(null);
+    expect(ann.tags).not.toContain("");
+
+    // Cleanup
+    await fetch(`${baseUrl}/api/sessions/${SESSION_ID}/annotations/ann-null-tag`, { method: "DELETE" });
+  });
+
   it("PUT annotation with malformed JSON returns 400", async () => {
     const res = await fetch(
       `${baseUrl}/api/sessions/${SESSION_ID}/annotations/some-ann-id`,
