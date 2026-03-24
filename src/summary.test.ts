@@ -119,6 +119,33 @@ describe("buildExcerpt", () => {
     // Should NOT contain the full 1000 chars
     expect(excerpt!.indexOf("x".repeat(501))).toBe(-1);
   });
+
+  it("handles single-turn conversation", () => {
+    const f = makeJsonl(dir, "s-single", [
+      { role: "user", text: "One lonely question" },
+    ]);
+    const excerpt = buildExcerpt(f);
+    expect(excerpt).not.toBeNull();
+    expect(excerpt).toContain("[User] One lonely question");
+    // Should NOT contain [Claude] since there's only one turn
+    expect(excerpt).not.toContain("[Claude]");
+  });
+
+  it("returns null for nonexistent file", () => {
+    expect(buildExcerpt("/tmp/nonexistent_summary_test_xyz.jsonl")).toBeNull();
+  });
+
+  it("returns null for file with only summary/metadata lines", () => {
+    // A file with only a summary line and no user/assistant messages
+    const f = path.join(dir, "meta-only.jsonl");
+    fs.writeFileSync(f, JSON.stringify({
+      type: "summary",
+      sessionId: "meta-only",
+      cwd: "/test",
+      version: "1.0.0",
+    }) + "\n");
+    expect(buildExcerpt(f)).toBeNull();
+  });
 });
 
 describe("getSummary", () => {
