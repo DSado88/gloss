@@ -254,8 +254,8 @@ export function backfillTurnCounts(db: ConvoDb, onUpdated?: () => void): void {
 
   const needsCounting = sessions.filter((s) => {
     if (!s.jsonl_path) return false;
-    // Never counted
-    if (!s.turn_count || s.turn_count === 0) return true;
+    // Never counted (null = never processed; 0 = processed but had no turns)
+    if (s.turn_count == null) return true;
     // File size changed since last count — recount
     try {
       const stat = fs.statSync(s.jsonl_path);

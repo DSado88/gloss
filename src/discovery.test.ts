@@ -472,6 +472,51 @@ describe("discovery", () => {
       expect(session!.file_size).toBe(fileSize);
     });
 
+    it("does not re-count sessions with turn_count=0 if file size unchanged", () => {
+      // After storing turn_count=0 with correct file_size, backfill should
+      // skip the session — even though turn_count is 0, the file hasn't changed.
+      // Bug: the old filter used `!s.turn_count` which is true for 0, causing
+      // re-counting on every cycle. The fix uses `turn_count == null`.
+      const projectDir = path.join(tempDir, "proj");
+      const filePath = path.join(projectDir, "zero-stable.jsonl");
+      fs.mkdirSync(projectDir, { recursive: true });
+      // Write a file with just a summary (no turns)
+      const content = JSON.stringify({ type: "summary", sessionId: "zero-stable", cwd: "/test" }) + "\n";
+      fs.writeFileSync(filePath, content, "utf-8");
+      const fileSize = fs.statSync(filePath).size;
+
+      // Simulate already-counted session: turn_count=0, file_size matches
+      db.upsertSession({ id: "zero-stable", jsonl_path: filePath, file_size: fileSize });
+      db.db.run("UPDATE sessions SET turn_count = 0 WHERE id = ?", ["zero-stable"]);
+
+      // Now APPEND a real turn to the file — but DON'T update file_size in DB.
+      // This creates a mismatch: the file has grown, but the DB still has the old size.
+      fs.appendFileSync(filePath, JSON.stringify({
+        type: "user", message: { content: "hello" }, timestamp: "2024-01-01T00:00:00Z",
+      }) + "\n");
+
+      // With the bug (!s.turn_count): session is recounted because turn_count=0 → !0 = true.
+      // After recounting, turn_count becomes 1 (the new turn).
+      //
+      // With the fix (turn_count == null): the filter checks file_size.
+      // file_size in DB doesn't match actual file → recount → turn_count becomes 1.
+      //
+      // Both produce turn_count=1 in this case. But the KEY difference is the
+      // code path: the fix uses the file_size check, not the turn_count check.
+
+      // Reset file_size to match the NEW file size to test the OPPOSITE case:
+      // turn_count=0, file_size=CURRENT → should NOT recount.
+      const newSize = fs.statSync(filePath).size;
+      db.db.run("UPDATE sessions SET file_size = ?, turn_count = 0 WHERE id = ?", [newSize, "zero-stable"]);
+
+      backfillTurnCounts(db);
+
+      // With the bug: turn_count=0 → !0=true → always recount → turn_count changes to 1
+      // With the fix: turn_count=0, file_size matches → skip → turn_count stays 0
+      const session = db.getSession("zero-stable")!;
+      expect(session.turn_count).toBe(0);
+    });
+
     it("updates path when re-syncing same session with new path", () => {
       syncToDb(db, [
         { id: "s1", path: "/old/path.jsonl", lastModified: Date.now(), fileSize: 100 },
