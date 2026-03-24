@@ -299,14 +299,9 @@ describe("buildConversation", () => {
       { type: "assistant", message: { content: "Response" }, timestamp: "t2" },
     ]);
     const conv = buildConversation(file);
-    // The user turn should still exist but with no blocks (empty noise that's not slash/continuation)
-    // Actually: since isSystemNoise returns true and there's no command-name or session continuation,
-    // parsedBlocks is empty. The turn is created with empty blocks.
-    // Let's verify: the first turn is user with empty blocks, second is assistant.
-    expect(conv.turns).toHaveLength(2);
-    expect(conv.turns[0].role).toBe("user");
-    expect(conv.turns[0].blocks).toHaveLength(0);
-    expect(conv.turns[1].role).toBe("assistant");
+    // Pure noise user message should be skipped entirely — no empty turn created
+    expect(conv.turns).toHaveLength(1);
+    expect(conv.turns[0].role).toBe("assistant");
   });
 
   it("filters system noise from array content user text blocks", () => {

@@ -122,4 +122,93 @@ describe("IncrementalParser — live update scenarios", () => {
     expect(update2.some((u) => u.type === "new_turn")).toBe(true);
     expect(parser.getTurns().length).toBe(4);
   });
+
+  it("skips system-noise-only user messages without creating empty turns", () => {
+    const parser = new IncrementalParser();
+
+    parser.feedLines([
+      makeSummaryLine(),
+      makeUserLine("Hello"),
+      makeAssistantLine("Hi!"),
+    ]);
+    expect(parser.getTurns().length).toBe(2); // user + assistant
+
+    // A system-noise-only user message (injected reminder, no real user text)
+    const noiseMsg = JSON.stringify({
+      type: "user",
+      message: {
+        content: "<system-reminder>The TodoWrite tool hasn't been used recently.</system-reminder>",
+      },
+      timestamp: "2024-01-15T10:31:00Z",
+    });
+
+    const updates = parser.feedLines([noiseMsg]);
+
+    // Should NOT create a new empty turn
+    expect(parser.getTurns().length).toBe(2);
+    expect(updates).toEqual([]);
+  });
+
+  it("skips system-noise-only user messages in array content format", () => {
+    const parser = new IncrementalParser();
+
+    parser.feedLines([
+      makeSummaryLine(),
+      makeUserLine("Hello"),
+      makeAssistantLine("Hi!"),
+    ]);
+    expect(parser.getTurns().length).toBe(2);
+
+    // Array content where all text blocks are system noise
+    const noiseMsg = JSON.stringify({
+      type: "user",
+      message: {
+        content: [
+          { type: "text", text: "<system-reminder>Remember to use TodoWrite.</system-reminder>" },
+          { type: "text", text: "<system-reminder>Another reminder here.</system-reminder>" },
+        ],
+      },
+      timestamp: "2024-01-15T10:31:00Z",
+    });
+
+    const updates = parser.feedLines([noiseMsg]);
+
+    expect(parser.getTurns().length).toBe(2);
+    expect(updates).toEqual([]);
+  });
+
+  it("system-noise between assistant turns does not create phantom user turn", () => {
+    const parser = new IncrementalParser();
+
+    parser.feedLines([
+      makeSummaryLine(),
+      makeUserLine("Hello"),
+      makeAssistantLine("Response 1"),
+    ]);
+    expect(parser.getTurns().length).toBe(2);
+
+    // System noise inserted between two assistant-related messages
+    const noiseMsg = JSON.stringify({
+      type: "user",
+      message: {
+        content: "<system-reminder>Injected noise.</system-reminder>",
+      },
+      timestamp: "2024-01-15T10:31:00Z",
+    });
+
+    parser.feedLines([noiseMsg]);
+
+    // Now a real user message follows
+    parser.feedLines([makeUserLine("Follow up")]);
+    parser.feedLines([makeAssistantLine("Response 2")]);
+
+    // Should be: user(Hello) + assistant(R1) + user(Follow up) + assistant(R2) = 4
+    // NOT 5 (with phantom empty user turn from noise)
+    expect(parser.getTurns().length).toBe(4);
+
+    // Verify no turn has empty blocks
+    for (const turn of parser.getTurns()) {
+      expect(turn.blocks.length).toBeGreaterThan(0);
+    }
+  });
 });

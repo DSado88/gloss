@@ -201,6 +201,9 @@ export class IncrementalParser {
         }
       }
 
+      // Skip messages that produced no blocks (e.g., pure system noise)
+      if (parsedBlocks.length === 0) continue;
+
       // Tool result folding: user messages with only tool_results merge into preceding assistant turn
       if (msgType === "user" && hasToolResults && !hasUserText) {
         if (this.currentTurn && this.currentTurn.role === "assistant") {
