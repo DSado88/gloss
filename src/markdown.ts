@@ -224,6 +224,10 @@ function applyInlineFormatting(text: string): string {
 
 /** Convert markdown text to HTML. */
 export function renderMarkdownInline(text: string): string {
+  // Normalize Windows line endings (\r\n → \n) so paragraph and line-break
+  // regexes work consistently. Also strip bare \r.
+  text = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
   // Strip control characters used as internal sentinel delimiters (\x00 for
   // fenced code blocks, \x01 for inline code placeholders). User content
   // with these bytes could bypass escaping or corrupt placeholder restoration.

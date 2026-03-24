@@ -422,6 +422,17 @@ describe("renderMarkdownInline", () => {
     expect(html).toContain("</p><p>");
   });
 
+  it("handles Windows \\r\\n line endings (paragraphs and line breaks)", () => {
+    // Text from Windows systems or copy-paste may use \r\n.
+    // The paragraph regex \n\n must still work, and \r must not leak into output.
+    const html = renderMarkdownInline("para one\r\n\r\npara two\r\nline three");
+    expect(html).toContain("</p><p>");         // paragraph break detected
+    expect(html).not.toContain("\r");           // no \r in output
+    expect(html).toContain("para one");
+    expect(html).toContain("para two");
+    expect(html).toContain("line three");
+  });
+
   // --- Line breaks ---
 
   it("inserts <br> for single newlines", () => {
