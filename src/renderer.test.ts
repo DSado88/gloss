@@ -161,6 +161,34 @@ describe("renderToolUse", () => {
     // Grep uses pattern first (via file_path ?? pattern ?? path)
     expect(html).toContain("TODO");
   });
+
+  it("renders tool with empty/unrecognized input fields without summary", () => {
+    // A tool whose input has no recognized summary fields should still render
+    // with just the name and the JSON detail, no summary span.
+    const block: ToolUseBlock = {
+      type: "tool_use",
+      name: "mcp__custom__do_thing",
+      input: { some_field: 42, nested: { a: 1 } },
+    };
+    const html = renderToolUse(block);
+    expect(html).toContain("mcp__custom__do_thing");
+    // No summary span since no recognized fields
+    expect(html).not.toContain("tool-summary");
+    // But the detail JSON should still contain the input
+    expect(html).toContain("some_field");
+    expect(html).toContain("42");
+  });
+
+  it("escapes HTML in tool name to prevent XSS", () => {
+    const block: ToolUseBlock = {
+      type: "tool_use",
+      name: '<img src=x onerror="alert(1)">',
+      input: {},
+    };
+    const html = renderToolUse(block);
+    expect(html).not.toContain("<img");
+    expect(html).toContain("&lt;img");
+  });
 });
 
 // ---------------------------------------------------------------------------
