@@ -449,6 +449,29 @@ describe("discovery", () => {
       expect(db.ftsIndexedCount()).toBe(0);
     });
 
+    it("backfillTurnCounts stores turn_count=0 for files with no turns", () => {
+      // A JSONL with only a summary line and no user/assistant messages
+      const projectDir = path.join(tempDir, "proj");
+      const filePath = path.join(projectDir, "no-turns.jsonl");
+      fs.mkdirSync(projectDir, { recursive: true });
+      fs.writeFileSync(filePath, JSON.stringify({
+        type: "summary",
+        sessionId: "no-turns-test",
+        cwd: "/test",
+        version: "1.0.0",
+      }) + "\n", "utf-8");
+
+      const fileSize = fs.statSync(filePath).size;
+      db.upsertSession({ id: "no-turns-test", jsonl_path: filePath, file_size: fileSize });
+
+      backfillTurnCounts(db);
+
+      const session = db.getSession("no-turns-test");
+      // turn_count should be 0, not null — storing 0 prevents re-counting every cycle
+      expect(session!.turn_count).toBe(0);
+      expect(session!.file_size).toBe(fileSize);
+    });
+
     it("updates path when re-syncing same session with new path", () => {
       syncToDb(db, [
         { id: "s1", path: "/old/path.jsonl", lastModified: Date.now(), fileSize: 100 },

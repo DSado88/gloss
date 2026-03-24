@@ -281,10 +281,8 @@ export function backfillTurnCounts(db: ConvoDb, onUpdated?: () => void): void {
         const stat = fs.statSync(s.jsonl_path);
         if (!stat.isFile()) continue;
         const turnCount = countTurns(s.jsonl_path, stat.size);
-        if (turnCount > 0) {
-          db.db.run("UPDATE sessions SET turn_count = ?, file_size = ? WHERE id = ?", [turnCount, stat.size, s.id]);
-          counted++;
-        }
+        db.db.run("UPDATE sessions SET turn_count = ?, file_size = ? WHERE id = ?", [turnCount, stat.size, s.id]);
+        counted++;
       } catch {
         // file may have been deleted
       }
