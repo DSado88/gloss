@@ -613,4 +613,54 @@ describe("server routes", () => {
     const res = await fetch(`${baseUrl}/unknown/path`);
     expect(res.status).toBe(404);
   });
+
+  // -----------------------------------------------------------------------
+  // Tags API
+  // -----------------------------------------------------------------------
+
+  it("GET /api/tags returns empty array when no tags exist", async () => {
+    const res = await fetch(`${baseUrl}/api/tags`);
+    expect(res.status).toBe(200);
+    const data = await res.json() as any[];
+    expect(Array.isArray(data)).toBe(true);
+  });
+
+  // -----------------------------------------------------------------------
+  // Highlights API
+  // -----------------------------------------------------------------------
+
+  it("GET /api/highlights returns 200 with default parameters", async () => {
+    const res = await fetch(`${baseUrl}/api/highlights`);
+    expect(res.status).toBe(200);
+    const data = await res.json() as any[];
+    expect(Array.isArray(data)).toBe(true);
+  });
+
+  it("GET /api/highlights with query returns 200", async () => {
+    const res = await fetch(`${baseUrl}/api/highlights?q=test&limit=10`);
+    expect(res.status).toBe(200);
+    const data = await res.json() as any[];
+    expect(Array.isArray(data)).toBe(true);
+  });
+
+  // -----------------------------------------------------------------------
+  // Sessions list API
+  // -----------------------------------------------------------------------
+
+  it("GET /api/sessions returns session list", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions`);
+    expect(res.status).toBe(200);
+    const data = await res.json() as any[];
+    expect(Array.isArray(data)).toBe(true);
+    expect(data.length).toBeGreaterThan(0);
+    expect(data[0]).toHaveProperty("id");
+    expect(data[0]).toHaveProperty("project");
+  });
+
+  it("GET /api/sessions with project filter returns filtered results", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions?project=nonexistent_xyz`);
+    expect(res.status).toBe(200);
+    const data = await res.json() as any[];
+    expect(data).toEqual([]);
+  });
 });
