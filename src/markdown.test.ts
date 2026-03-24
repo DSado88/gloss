@@ -304,6 +304,20 @@ describe("renderMarkdownInline", () => {
     expect(html).not.toContain('href="https://test.org,"');
   });
 
+  it("preserves & in URL query params via HTML entity encoding", () => {
+    // Markdown link with & in query string
+    const html1 = renderMarkdownInline("[API](https://example.com/api?a=1&b=2)");
+    // The & is escaped to &amp; by escape(), then used in href — browser decodes correctly
+    expect(html1).toContain('href="https://example.com/api?a=1&amp;b=2"');
+    expect(html1).toContain(">API</a>");
+
+    // Bare auto-linked URL with & in query string
+    const html2 = renderMarkdownInline("Visit https://example.com/api?a=1&b=2 here");
+    expect(html2).toContain('href="https://example.com/api?a=1&amp;b=2"');
+    // Display text also shows encoded & — browser renders as &
+    expect(html2).toContain(">https://example.com/api?a=1&amp;b=2</a>");
+  });
+
   // --- Auto-linking file paths ---
 
   it("auto-links /Users/ paths", () => {
