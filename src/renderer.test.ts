@@ -296,6 +296,41 @@ describe("renderToolResult", () => {
     expect(html).toContain("Error");
   });
 
+  it("renders error on long structured result (>2000 JSON chars) with correct classes and header", () => {
+    // Long JSON error results (e.g. failed API responses) use the preview+full path.
+    // The error class and "Error" label must appear in this path too.
+    const longJson = '{"error": "' + "x".repeat(2100) + '"}';
+    const block: ToolResultBlock = {
+      type: "tool_result",
+      content: longJson,
+      isError: true,
+    };
+    const html = renderToolResult(block);
+    expect(html).toContain("tool-error");
+    expect(html).toContain("Error");           // header label
+    expect(html).toContain("chars)");           // char count shown
+    expect(html).toContain("tool-result-preview");
+    expect(html).toContain("tool-result-full");
+    expect(html).not.toContain("agent-result"); // JSON → not agent path
+  });
+
+  it("renders error on agent-style result (>500 non-JSON chars) with correct classes", () => {
+    // Long text error results (e.g. stack traces) go through agent/markdown path.
+    // The error class must be included in the agent-result div.
+    const longText = "Error: something went wrong\n" + "  at module.js:123\n".repeat(30);
+    const block: ToolResultBlock = {
+      type: "tool_result",
+      content: longText,
+      isError: true,
+    };
+    const html = renderToolResult(block);
+    expect(html).toContain("tool-error");
+    expect(html).toContain("agent-result");
+    expect(html).toContain("Error");           // header label, not "Result"
+    expect(html).toContain("chars)");           // char count shown
+    expect(html).not.toContain(">Result<");     // must NOT say "Result"
+  });
+
   it("includes meta when provided", () => {
     const block: ToolResultBlock = {
       type: "tool_result",
