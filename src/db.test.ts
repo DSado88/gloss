@@ -302,6 +302,13 @@ describe("ConvoDb", () => {
       expect(results).toHaveLength(1);
     });
 
+    it("getAnnotationsByTag with limit: 0 returns no results", () => {
+      db.addTag("ann-001", "tagged");
+      db.addTag("ann-002", "tagged");
+      const results = db.getAnnotationsByTag("tagged", { limit: 0 });
+      expect(results).toHaveLength(0);
+    });
+
     it("deleting an annotation cascades to annotation_tags", () => {
       db.addTag("ann-001", "cascade-test");
       db.deleteAnnotation("ann-001");
@@ -387,6 +394,12 @@ describe("ConvoDb", () => {
     it("respects limit", () => {
       const results = db.searchAnnotations("", { limit: 1 });
       expect(results).toHaveLength(1);
+    });
+
+    it("searchAnnotations with limit: 0 returns no results", () => {
+      // limit: 0 means "no results" — must not bypass the LIMIT clause
+      const results = db.searchAnnotations("", { limit: 0 });
+      expect(results).toHaveLength(0);
     });
 
     it("FTS stays in sync after update", () => {

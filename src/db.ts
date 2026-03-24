@@ -420,7 +420,7 @@ export class ConvoDb {
       ORDER BY a.created_at DESC`;
     const params: SQLQueryBindings[] = [tagName];
 
-    if (opts?.limit) {
+    if (opts?.limit != null) {
       sql += " LIMIT ?";
       params.push(opts.limit);
     }
@@ -489,7 +489,7 @@ export class ConvoDb {
     if (clauses.length) sql += " WHERE " + clauses.join(" AND ");
     sql += " ORDER BY a.created_at DESC";
 
-    if (opts?.limit) {
+    if (opts?.limit != null) {
       sql += " LIMIT ?";
       params.push(opts.limit);
     }
