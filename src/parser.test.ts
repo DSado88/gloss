@@ -890,4 +890,20 @@ describe("IncrementalParser incremental feeding", () => {
     expect(conv.turns[1].role).toBe("assistant");
     expect(conv.turns[1].blocks[0]).toHaveProperty("text", "real answer");
   });
+
+  it("handles messages with missing message field (active session partial write)", () => {
+    // During active writes, a line might be flushed with only the type/timestamp
+    // fields before the message payload is written. These should be skipped.
+    const file = createJsonl([
+      { type: "user", timestamp: "t1" },  // no message field at all
+      { type: "user", message: { content: "actual question" }, timestamp: "t2" },
+      { type: "assistant", message: null, timestamp: "t3" },  // message is null
+      { type: "assistant", message: { content: "actual answer" }, timestamp: "t4" },
+    ]);
+    const conv = buildConversation(file);
+    // Both messages without content should be skipped
+    expect(conv.turns).toHaveLength(2);
+    expect(conv.turns[0].blocks[0]).toHaveProperty("text", "actual question");
+    expect(conv.turns[1].blocks[0]).toHaveProperty("text", "actual answer");
+  });
 });
