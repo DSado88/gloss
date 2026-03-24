@@ -218,6 +218,22 @@ describe("deriveProjectNames", () => {
     expect(result.dirProject).toBe("");
   });
 
+  it("handles project path with only a trailing slash (root dir)", () => {
+    const result = deriveProjectNames("/", null);
+    // After stripping trailing slashes, path becomes "" → shortProject is ""
+    expect(result.project).toBe("");
+    expect(result.fullProject).toBe("/");
+  });
+
+  it("decodes ori/orchid temp dir paths in dirProject", () => {
+    const result = deriveProjectNames(
+      null,
+      "/Users/test/.claude/projects/-private-tmp-ori-orchid-work-bidi-1771993919-746449/session.jsonl",
+    );
+    expect(result.dirProject).toBe("ori/orchid-bidi");
+    expect(result.project).toBe("ori/orchid-bidi");
+  });
+
   it("matches buildServerIndex output for same inputs", () => {
     // Verify deriveProjectNames produces the same result as buildServerIndex
     const sessions: SessionRecord[] = [{
