@@ -494,6 +494,15 @@ describe("server routes", () => {
     expect(data.error).toBeDefined();
   });
 
+  it("GET /api/sessions/:id/data with start > end clamps end to start", async () => {
+    // When start > end, the server should clamp end = start (single-turn result)
+    const res = await fetch(`${baseUrl}/api/sessions/${SESSION_ID}/data?start=1&end=0`);
+    expect(res.status).toBe(200);
+    const data = await res.json() as any;
+    expect(data.start).toBeLessThanOrEqual(data.end);
+    expect(data.turns.length).toBeLessThanOrEqual(1);
+  });
+
   // -----------------------------------------------------------------------
   // Search API
   // -----------------------------------------------------------------------
