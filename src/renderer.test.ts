@@ -617,6 +617,21 @@ describe("renderTurn", () => {
     expect(tocEntry!.preview).toBe("/help");
   });
 
+  it("slash_command preview is used even after whitespace-only text block", () => {
+    // Bug: firstText set to "   " by whitespace text block. The slash_command
+    // check uses `if (!firstText)` which is false for non-empty whitespace.
+    // The preview ends up empty instead of showing the command.
+    const turn: Turn = {
+      role: "user",
+      blocks: [
+        { type: "text", text: "   " },
+        { type: "slash_command", command: "/review" },
+      ],
+    };
+    const { tocEntry } = renderTurn(turn, 0, true, true);
+    expect(tocEntry!.preview).toBe("/review");
+  });
+
   it("renders session_continuation blocks", () => {
     const turn: Turn = {
       role: "user",

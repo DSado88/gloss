@@ -216,7 +216,7 @@ export function renderTurn(
         blocksHtml.push(
           `<div class="slash-command"><span class="slash-cmd">${cmd}</span></div>`,
         );
-        if (!firstText) firstText = block.command;
+        if (!firstText.trim()) firstText = block.command;
         break;
       }
 
@@ -228,7 +228,7 @@ export function renderTurn(
             `<div class="session-summary"><p>${summary}</p></div>` +
             `</details>`,
         );
-        if (!firstText) firstText = "--- Session continued ---";
+        if (!firstText.trim()) firstText = "--- Session continued ---";
         break;
       }
 
