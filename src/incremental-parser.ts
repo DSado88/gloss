@@ -159,7 +159,7 @@ export class IncrementalParser {
           } else if (blockType === "tool_result") {
             hasToolResults = true;
             const resultContent = (block.content as string | unknown[] | undefined) ?? "";
-            const isError = (block.is_error as boolean) ?? false;
+            const isError = block.is_error === true;
 
             let resultText: string;
             let metaText: string | null = null;

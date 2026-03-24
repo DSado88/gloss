@@ -891,6 +891,32 @@ describe("IncrementalParser incremental feeding", () => {
     expect(conv.turns[1].blocks[0]).toHaveProperty("text", "real answer");
   });
 
+  it("treats is_error string 'false' as not-error (coerce to boolean correctly)", () => {
+    // Bug: the parser uses `(block.is_error as boolean) ?? false` which only
+    // handles null/undefined. If is_error is the string "false" (from malformed
+    // JSONL), ?? doesn't trigger because "false" is not nullish. The truthy
+    // string "false" causes the result to be incorrectly marked as an error.
+    const file = createJsonl([
+      {
+        type: "assistant",
+        message: {
+          content: [
+            { type: "text", text: "Running command" },
+            { type: "tool_use", id: "tu1", name: "Bash", input: { command: "ls" } },
+            // is_error is the STRING "false" — should be treated as not-error
+            { type: "tool_result", content: "file.txt", is_error: "false", tool_use_id: "tu1" },
+          ],
+        },
+        timestamp: "t1",
+      },
+    ]);
+    const conv = buildConversation(file);
+    const toolResults = conv.turns.flatMap((t) => t.blocks).filter((b) => b.type === "tool_result");
+    expect(toolResults.length).toBe(1);
+    // The string "false" must be coerced to boolean false, not left as truthy string
+    expect((toolResults[0] as any).isError).toBe(false);
+  });
+
   it("handles messages with missing message field (active session partial write)", () => {
     // During active writes, a line might be flushed with only the type/timestamp
     // fields before the message payload is written. These should be skipped.
