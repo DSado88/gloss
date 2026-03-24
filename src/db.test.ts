@@ -618,6 +618,28 @@ describe("ConvoDb", () => {
       expect(result.skipped).toBe(2);
     });
 
+    it("filters null and non-string tags during import without crashing", () => {
+      // Bug: null in the tags array causes addTag(id, null) → NOT NULL crash.
+      // The entire transaction rolls back, losing all annotations in the batch.
+      const withBadTags: SidecarAnnotation[] = [
+        {
+          id: "ann-bad-tags",
+          turnIndex: 0,
+          charStart: 0,
+          charEnd: 5,
+          text: "test",
+          tags: ["valid-tag", null as any, 42 as any, "", "another-tag"],
+        },
+      ];
+      const result = db.importAnnotationsJson("sess-001", withBadTags);
+      expect(result.imported).toBe(1);
+      // Only valid non-empty string tags should be stored
+      const ann = db.getAnnotation("ann-bad-tags")!;
+      expect(ann.tags).toContain("valid-tag");
+      expect(ann.tags).toContain("another-tag");
+      expect(ann.tags).toHaveLength(2);
+    });
+
     it("handles annotations with no tags", () => {
       const noTags: SidecarAnnotation[] = [
         {

@@ -590,7 +590,9 @@ export class ConvoDb {
 
         if (ann.tags?.length) {
           for (const tagName of ann.tags) {
-            this.addTag(ann.id, tagName);
+            if (typeof tagName === "string" && tagName) {
+              this.addTag(ann.id, tagName);
+            }
           }
         }
 
