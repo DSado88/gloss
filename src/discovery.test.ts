@@ -168,6 +168,37 @@ describe("discovery", () => {
       }
     });
 
+    it("follows symlinked individual JSONL files (not just directories)", () => {
+      // A symlink to a .jsonl file (not a directory) should be followed.
+      // This tests the entry.isSymbolicLink() → statSync → isFile path.
+      const projectDir = path.join(tempDir, "proj");
+      fs.mkdirSync(projectDir, { recursive: true });
+      const externalDir = fs.mkdtempSync(path.join(os.tmpdir(), "convo-discovery-ext-file-"));
+      try {
+        const realPath = path.join(externalDir, "real-session.jsonl");
+        writeMinimalJsonl(realPath, "symlinked-file-session");
+        fs.symlinkSync(realPath, path.join(projectDir, "linked.jsonl"));
+
+        const { sessions } = scanProjectsDir(tempDir);
+        expect(sessions.some((s) => s.id === "symlinked-file-session")).toBe(true);
+      } finally {
+        fs.rmSync(externalDir, { recursive: true, force: true });
+      }
+    });
+
+    it("skips dangling symlinks without crashing", () => {
+      const projectDir = path.join(tempDir, "proj");
+      fs.mkdirSync(projectDir, { recursive: true });
+      // Create a symlink pointing to a nonexistent target
+      fs.symlinkSync("/nonexistent/path/session.jsonl", path.join(projectDir, "dangling.jsonl"));
+      // Also add a real file to confirm scanning continues past the dangling link
+      writeMinimalJsonl(path.join(projectDir, "real.jsonl"), "real-session");
+
+      const { sessions } = scanProjectsDir(tempDir);
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].id).toBe("real-session");
+    });
+
     it("discovers JSONL files in deeply nested directories", () => {
       const deepDir = path.join(tempDir, "proj", "nested", "deeper");
       writeMinimalJsonl(path.join(deepDir, "deep-session.jsonl"), "deep-session");
