@@ -917,6 +917,30 @@ describe("IncrementalParser incremental feeding", () => {
     expect((toolResults[0] as any).isError).toBe(false);
   });
 
+  it("tool_result-only user message without preceding assistant turn creates its own turn", () => {
+    // In resumed sessions, the first message can be a tool_result-only user message
+    // with no preceding assistant turn to fold into. It must not crash or be silently
+    // dropped — it should create a standalone user turn.
+    const file = createJsonl([
+      {
+        type: "user",
+        message: {
+          content: [
+            { type: "tool_result", content: "file contents", tool_use_id: "tu-orphan" },
+          ],
+        },
+        timestamp: "t1",
+      },
+      { type: "assistant", message: { content: "I see the file." }, timestamp: "t2" },
+    ]);
+    const conv = buildConversation(file);
+    // The tool_result should NOT be dropped — it forms its own user turn
+    expect(conv.turns).toHaveLength(2);
+    expect(conv.turns[0].role).toBe("user");
+    expect(conv.turns[0].blocks[0].type).toBe("tool_result");
+    expect(conv.turns[1].role).toBe("assistant");
+  });
+
   it("handles messages with missing message field (active session partial write)", () => {
     // During active writes, a line might be flushed with only the type/timestamp
     // fields before the message payload is written. These should be skipped.
