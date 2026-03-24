@@ -809,4 +809,50 @@ describe("IncrementalParser incremental feeding", () => {
     expect(meta.model).toBe("claude-4");
     expect(meta.startTime).toBe("t1");
   });
+
+  it("handles tool_result with empty content", () => {
+    const file = createJsonl([
+      { type: "user", message: { content: "Run this" }, timestamp: "t1" },
+      {
+        type: "assistant",
+        message: {
+          content: [
+            { type: "tool_use", id: "tu1", name: "Bash", input: { command: "true" } },
+            { type: "tool_result", tool_use_id: "tu1", content: "" },
+          ],
+        },
+        timestamp: "t2",
+      },
+    ]);
+    const conv = buildConversation(file);
+    // The tool_result should exist with empty content, not crash
+    const toolResults = conv.turns.flatMap((t) => t.blocks).filter((b) => b.type === "tool_result");
+    expect(toolResults.length).toBe(1);
+    expect((toolResults[0] as any).content).toBe("");
+  });
+
+  it("preserves unicode in thinking blocks (emoji, CJK, combining marks)", () => {
+    const thinkingText = "Let me analyze 🧠 this: 中文テスト, café résumé";
+    const file = createJsonl([
+      { type: "user", message: { content: "Question" }, timestamp: "t1" },
+      {
+        type: "assistant",
+        message: {
+          content: [
+            { type: "thinking", thinking: thinkingText },
+            { type: "text", text: "Answer" },
+          ],
+        },
+        timestamp: "t2",
+      },
+    ]);
+    const conv = buildConversation(file);
+    const thinking = conv.turns[1].blocks.find((b) => b.type === "thinking");
+    expect(thinking).toBeDefined();
+    expect((thinking as any).text).toBe(thinkingText);
+    // Verify specific unicode characters survived round-trip
+    expect((thinking as any).text).toContain("🧠");
+    expect((thinking as any).text).toContain("中文");
+    expect((thinking as any).text).toContain("café");
+  });
 });
