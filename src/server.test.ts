@@ -638,6 +638,29 @@ describe("server routes", () => {
     });
   });
 
+  it("PATCH /api/settings with null terminal_app does not store literal 'null' string", async () => {
+    // Bug: String(null) → "null", stored in DB. GET returns terminal_app: "null"
+    // instead of falling back to the default "Terminal".
+    await fetch(`${baseUrl}/api/settings`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ terminal_app: null }),
+    });
+
+    const res = await fetch(`${baseUrl}/api/settings`);
+    const data = await res.json() as any;
+    // Must NOT be the string "null" — should be the default or empty
+    expect(data.terminal_app).not.toBe("null");
+    expect(data.terminal_app).toBe("Terminal");
+
+    // Reset
+    await fetch(`${baseUrl}/api/settings`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ terminal_app: "Terminal" }),
+    });
+  });
+
   it("PATCH /api/settings with Infinity min_turns does not corrupt setting", async () => {
     // Bug: JSON.parse('{"min_turns":1e309}') produces {min_turns: Infinity}.
     // Number(Infinity) → Infinity, String(Infinity) → "Infinity",

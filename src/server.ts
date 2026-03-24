@@ -1239,7 +1239,8 @@ async function handleApiRouteInner(
       db.setSetting("resume_enabled", body.resume_enabled ? "1" : "0");
     }
     if ("terminal_app" in body) {
-      db.setSetting("terminal_app", String(body.terminal_app));
+      const app = body.terminal_app;
+      db.setSetting("terminal_app", typeof app === "string" && app ? app : "Terminal");
     }
     if ("resume_dangerous_mode" in body) {
       db.setSetting("resume_dangerous_mode", body.resume_dangerous_mode ? "1" : "0");
