@@ -8,6 +8,42 @@ describe("mcp-server source integrity", () => {
     "utf-8",
   );
 
+  it("all tool handlers use glossFetch/glossPost, not raw fetch()", () => {
+    // Raw fetch() misses the timeout, connection-refused detection, and
+    // proper error messages that glossFetch provides.
+    const toolSections = [...src.matchAll(/server\.tool\(\s*"(\w+)"[\s\S]*?\n\);/g)];
+    expect(toolSections.length).toBeGreaterThanOrEqual(5);
+    for (const m of toolSections) {
+      const name = m[1];
+      const body = m[0];
+      const usesHelper = body.includes("glossFetch") || body.includes("glossPost");
+      const usesRawFetch = /\bfetch\(/.test(body);
+      expect(usesHelper).toBe(true);
+      expect(usesRawFetch).toBe(false);
+    }
+  });
+
+  it("read_conversation clamps end to MAX_READ_WINDOW to prevent context blowout", () => {
+    // The read_conversation handler must clamp endTurn so a single call
+    // can't dump an entire 1000-turn conversation into context.
+    const readSection = src.match(
+      /server\.tool\(\s*"read_conversation"[\s\S]*?\n\);/,
+    );
+    expect(readSection).not.toBeNull();
+    expect(readSection![0]).toContain("MAX_READ_WINDOW");
+    expect(readSection![0]).toContain("Math.min");
+  });
+
+  it("search_conversations passes maxSources to API", () => {
+    // Without maxSources, the API returns default 6. The tool should
+    // forward the user's requested count.
+    const searchSection = src.match(
+      /server\.tool\(\s*"search_conversations"[\s\S]*?\n\);/,
+    );
+    expect(searchSection).not.toBeNull();
+    expect(searchSection![0]).toContain("maxSources");
+  });
+
   it("list_tags uses GLOSS_URL, not undeclared BASE variable", () => {
     // Bug: list_tags handler used `${BASE}/api/tags` but BASE is never declared.
     // GLOSS_URL is the correct variable (defined at the top of the file).
