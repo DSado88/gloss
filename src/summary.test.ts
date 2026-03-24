@@ -135,6 +135,53 @@ describe("buildExcerpt", () => {
     expect(buildExcerpt("/tmp/nonexistent_summary_test_xyz.jsonl")).toBeNull();
   });
 
+  it("extracts text from turns with mixed tool+text blocks, skips tool-only turns", () => {
+    const f = path.join(dir, "mixed.jsonl");
+    const lines = [
+      // Turn 0: user text
+      JSON.stringify({
+        type: "user",
+        message: { content: [{ type: "text", text: "Please fix the bug" }] },
+        sessionId: "mixed",
+      }),
+      // Turn 1: assistant with both text and tool_use — only text should appear in excerpt
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [
+          { type: "text", text: "Let me check the code" },
+          { type: "tool_use", id: "tu1", name: "Read", input: { file_path: "/src/app.ts" } },
+        ] },
+        sessionId: "mixed",
+      }),
+      // Turn 2: user with only tool_result (no text) — should be folded/skipped by parser
+      JSON.stringify({
+        type: "user",
+        message: { content: [
+          { type: "tool_result", tool_use_id: "tu1", content: "file contents here" },
+        ] },
+        sessionId: "mixed",
+      }),
+      // Turn 3: assistant with text
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "text", text: "I found the issue" }] },
+        sessionId: "mixed",
+      }),
+    ];
+    fs.writeFileSync(f, lines.join("\n") + "\n");
+    const excerpt = buildExcerpt(f);
+    expect(excerpt).not.toBeNull();
+    // Text content should appear
+    expect(excerpt).toContain("[User] Please fix the bug");
+    // Parser merges consecutive assistant turns (tool_result folding + same-role merge)
+    // so both text blocks end up in the same [Claude] turn
+    expect(excerpt).toContain("[Claude] Let me check the code");
+    expect(excerpt).toContain("I found the issue");
+    // Tool content should NOT appear in excerpt
+    expect(excerpt).not.toContain("file contents here");
+    expect(excerpt).not.toContain("app.ts");
+  });
+
   it("returns null for file with only summary/metadata lines", () => {
     // A file with only a summary line and no user/assistant messages
     const f = path.join(dir, "meta-only.jsonl");
