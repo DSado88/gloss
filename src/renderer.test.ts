@@ -279,6 +279,20 @@ describe("renderToolResult", () => {
     expect(html).toContain("Duration: 1.5s");
   });
 
+  it("whitespace-prefixed JSON content is NOT treated as agent result", () => {
+    // Content starting with whitespace then { should be detected as JSON via trimStart()
+    const content = "   \n{" + '"key": "value",'.repeat(40) + '"end": true}';
+    const block: ToolResultBlock = {
+      type: "tool_result",
+      content,
+    };
+    const html = renderToolResult(block);
+    // Should NOT have agent-result class — it starts with { after trimming
+    expect(html).not.toContain("agent-result");
+    // Should be rendered as preformatted text (escaped)
+    expect(html).toContain("tool-result-preview");
+  });
+
   it("escapes </script> in tool result content (prevents page breakout)", () => {
     // Tool results from Read/Bash can contain HTML/JS file contents
     const content = 'const x = 1;\n</script><script>alert("xss")</script>\nconst y = 2;';
