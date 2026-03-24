@@ -495,6 +495,14 @@ describe("discovery", () => {
       expect(noResults.length).toBe(0);
     });
 
+    it("backfillFtsIndex fires onComplete even when nothing needs indexing", () => {
+      // The onComplete callback must fire in the "nothing to do" path too,
+      // so callers (like the server startup chain) don't hang waiting.
+      let called = false;
+      backfillFtsIndex(db, () => { called = true; });
+      expect(called).toBe(true);
+    });
+
     it("backfillFtsIndex skips sessions without jsonl_path", () => {
       db.upsertSession({ id: "no-path" });
 
