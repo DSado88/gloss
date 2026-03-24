@@ -750,6 +750,29 @@ describe("server routes", () => {
     expect(res.status).toBe(404);
   });
 
+  it("DELETE of nonexistent annotation returns 200 (idempotent)", async () => {
+    // REST DELETE is idempotent — deleting a resource that doesn't exist is not an error.
+    const res = await fetch(
+      `${baseUrl}/api/sessions/${SESSION_ID}/annotations/totally-nonexistent-ann-id`,
+      { method: "DELETE" },
+    );
+    expect(res.status).toBe(200);
+    const data = await res.json() as any;
+    expect(data.ok).toBe(true);
+  });
+
+  it("PUT to nonexistent session returns 404", async () => {
+    const res = await fetch(
+      `${baseUrl}/api/sessions/nonexistent-session-xyz/annotations/ann-1`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ turnIndex: 0, charStart: 0, charEnd: 5, text: "test" }),
+      },
+    );
+    expect(res.status).toBe(404);
+  });
+
   it("unknown API routes return 404", async () => {
     const res = await fetch(`${baseUrl}/api/unknown`);
     expect(res.status).toBe(404);
