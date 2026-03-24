@@ -118,6 +118,30 @@ describe("discovery", () => {
       expect(sessions[0].path).toBe(newerPath);
     });
 
+    it("deduplicates same sessionId from different filenames in same directory", () => {
+      // Real-world edge case: two files in the same project dir with different
+      // filenames but the same sessionId in their JSONL content (e.g., a session
+      // file was copied). Dedup should keep the newer file.
+      const projectDir = path.join(tempDir, "-Users-test-project");
+      fs.mkdirSync(projectDir, { recursive: true });
+
+      // Original file (older)
+      const original = path.join(projectDir, "original.jsonl");
+      writeMinimalJsonl(original, "same-uuid");
+
+      // Copy with a different name (newer mtime)
+      const copy = path.join(projectDir, "copy-of-session.jsonl");
+      writeMinimalJsonl(copy, "same-uuid");
+      const futureTime = Date.now() + 60000;
+      fs.utimesSync(copy, futureTime / 1000, futureTime / 1000);
+
+      const { sessions } = scanProjectsDir(tempDir);
+      // Dedup keeps only ONE, and it should be the newer copy
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].id).toBe("same-uuid");
+      expect(sessions[0].path).toBe(copy);
+    });
+
     it("extracts metadata from JSONL header", () => {
       const projectDir = path.join(tempDir, "-Users-test-project1");
       fs.mkdirSync(projectDir, { recursive: true });
