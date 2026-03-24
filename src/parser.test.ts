@@ -855,4 +855,39 @@ describe("IncrementalParser incremental feeding", () => {
     expect((thinking as any).text).toContain("中文");
     expect((thinking as any).text).toContain("café");
   });
+
+  it("skips messages where content is an object (not string/array)", () => {
+    // Malformed JSONL: content is a plain object instead of string or array.
+    // The parser should skip these gracefully, not crash.
+    const file = createJsonl([
+      { type: "user", message: { content: "valid question" }, timestamp: "t1" },
+      {
+        type: "assistant",
+        message: { content: { type: "text", text: "this is wrong format" } },
+        timestamp: "t2",
+      },
+      { type: "assistant", message: { content: "valid answer" }, timestamp: "t3" },
+    ]);
+    const conv = buildConversation(file);
+    // The object-content message should be skipped (no blocks → no turn)
+    // Valid messages should still parse: user + assistant (the valid ones)
+    expect(conv.turns).toHaveLength(2);
+    expect(conv.turns[0].role).toBe("user");
+    expect(conv.turns[1].role).toBe("assistant");
+    expect(conv.turns[1].blocks[0]).toHaveProperty("text", "valid answer");
+  });
+
+  it("skips messages where content is a number", () => {
+    const file = createJsonl([
+      { type: "user", message: { content: "hello" }, timestamp: "t1" },
+      { type: "assistant", message: { content: 42 }, timestamp: "t2" },
+      { type: "assistant", message: { content: "real answer" }, timestamp: "t3" },
+    ]);
+    const conv = buildConversation(file);
+    // content:42 is neither string nor array → message skipped
+    expect(conv.turns).toHaveLength(2);
+    expect(conv.turns[0].role).toBe("user");
+    expect(conv.turns[1].role).toBe("assistant");
+    expect(conv.turns[1].blocks[0]).toHaveProperty("text", "real answer");
+  });
 });
