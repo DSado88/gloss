@@ -77,6 +77,35 @@ describe("buildExcerpt", () => {
     expect(excerpt).not.toContain("Turn 5");
   });
 
+  it("returns null for conversation with only tool calls (no text)", () => {
+    // Some conversations are purely tool-driven with no user text or assistant text
+    const f = path.join(dir, "tools-only.jsonl");
+    const lines = [
+      JSON.stringify({
+        type: "user",
+        message: {
+          content: [
+            { type: "tool_result", tool_use_id: "tu1", content: "file contents here" },
+          ],
+        },
+        sessionId: "tools-only",
+      }),
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            { type: "tool_use", id: "tu2", name: "Bash", input: { command: "ls" } },
+          ],
+        },
+        sessionId: "tools-only",
+      }),
+    ];
+    fs.writeFileSync(f, lines.join("\n") + "\n");
+    const excerpt = buildExcerpt(f);
+    // No text blocks → no excerpt content → should return null
+    expect(excerpt).toBeNull();
+  });
+
   it("truncates long turns to 500 chars", () => {
     const longText = "x".repeat(1000);
     const f = makeJsonl(dir, "s3", [
