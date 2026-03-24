@@ -457,6 +457,27 @@ describe("ConvoDb", () => {
       expect(results[0].session_id).toBe("sess-001");
     });
 
+    it("combines text query with tag filter (AND semantics)", () => {
+      // Real-world use case: searching for specific text among tagged annotations.
+      // The highlights API passes both q and tag together.
+      db.addTag("ann-alpha", "important");
+      db.addTag("ann-beta", "important");
+
+      // Search for "machine" within "important" tagged annotations
+      const results = db.searchAnnotations("machine", { tags: ["important"] });
+      expect(results).toHaveLength(1);
+      expect(results[0].id).toBe("ann-alpha"); // "machine learning" + tagged "important"
+
+      // "weather" doesn't match any "important" annotations
+      const noMatch = db.searchAnnotations("weather", { tags: ["important"] });
+      expect(noMatch).toHaveLength(1); // ann-beta has "weather" text and "important" tag
+      expect(noMatch[0].id).toBe("ann-beta");
+
+      // Search for text that exists but NOT in tagged annotations
+      const wrongTag = db.searchAnnotations("machine", { tags: ["nonexistent-tag"] });
+      expect(wrongTag).toHaveLength(0);
+    });
+
     it("FTS stays in sync after delete", () => {
       db.deleteAnnotation("ann-alpha");
       const results = db.searchAnnotations("machine learning");
