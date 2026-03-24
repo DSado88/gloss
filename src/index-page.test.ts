@@ -109,6 +109,32 @@ describe("buildServerIndex", () => {
     expect(parsed[1].project).toBe("");
   });
 
+  it("escapes session IDs in client-side href and onclick attributes", () => {
+    // Session IDs go directly into href="/c/{id}" and onclick="fn('{id}')"
+    // in the client JS. A crafted ID with quotes or HTML could inject.
+    const sessions: SessionRecord[] = [{
+      id: 'x" onclick="alert(1)" x="',
+      title: "Normal title",
+      project: "/home/user/project",
+      start_time: 1710000000,
+      turn_count: 5,
+    }];
+    const html = buildServerIndex(sessions);
+
+    // The ALL JSON should have the ID properly JSON-escaped
+    const allMatch = html.match(/const ALL = (.*?);[\r\n]/s);
+    expect(allMatch).not.toBeNull();
+    const parsed = JSON.parse(allMatch![1].replace(/<\\\//g, "</"));
+    // ID survives JSON round-trip
+    expect(parsed[0].id).toBe('x" onclick="alert(1)" x="');
+
+    // The client JS must not contain unescaped quotes from the ID in href/onclick
+    // Check that the renderRecent/renderByProject functions use esc() for s.id
+    // in href attributes — currently they DON'T, which is the bug.
+    // After the fix, the esc() function will encode " as &quot; in HTML context.
+    expect(html).toContain("esc(s.id)");
+  });
+
   it("does not embed raw </ in inline script JSON (prevents XSS via </script>)", () => {
     const sessions: SessionRecord[] = [{
       id: "xss-test",

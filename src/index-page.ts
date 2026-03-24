@@ -966,30 +966,31 @@ function renderRecent(filtered) {
   html += '</div>';
   for (const s of visible) {
     const proj = esc(s.project || s.dirProject || '—');
+    const sid = esc(s.id);
     const hiddenCls = s.hidden ? ' hidden-row' : '';
-    html += '<a class="session-row' + hiddenCls + '" href="/c/' + s.id + '">';
+    html += '<a class="session-row' + hiddenCls + '" href="/c/' + sid + '">';
     html += '<span class="s-project" title="' + esc(s.fullProject) + '">' + proj + '</span>';
     const titleBit = s.title ? '<span class="s-title">' + esc(s.title) + '</span>' : '';
     const ftsBit = s._ftsMatch ? '<span class="s-fts">' + s._ftsMatch + ' matches</span>' : '';
-    html += '<span class="s-session"><span class="s-id" title="' + s.id + '">' + truncateId(s.id) + '</span>' + titleBit + ftsBit + '</span>';
+    html += '<span class="s-session"><span class="s-id" title="' + sid + '">' + truncateId(s.id) + '</span>' + titleBit + ftsBit + '</span>';
     html += '<span class="s-time">' + fmtTime(s.last_modified) + '</span>';
     html += '<span class="s-turns">' + (s.turn_count || '—') + '</span>';
     html += '<span class="s-size">' + fmtSize(s.file_size) + '</span>';
     html += '<span class="s-actions">';
-    html += '<button class="s-actions-trigger" onclick="toggleRowMenu(\\'' + s.id + '\\',event)">\\u22EE</button>';
-    html += '<div class="s-actions-menu" id="menu-' + s.id + '">';
+    html += '<button class="s-actions-trigger" onclick="toggleRowMenu(\\'' + sid + '\\',event)">\\u22EE</button>';
+    html += '<div class="s-actions-menu" id="menu-' + sid + '">';
     if (SETTINGS.resume_enabled) {
-      html += '<button onclick="resumeSession(\\'' + s.id + '\\',event)"><span class="menu-icon">\\u25B6</span>Resume in terminal</button>';
+      html += '<button onclick="resumeSession(\\'' + sid + '\\',event)"><span class="menu-icon">\\u25B6</span>Resume in terminal</button>';
     }
-    html += '<button onclick="copyResume(\\'' + s.id + '\\',event)"><span class="menu-icon">\\u2398</span>Copy resume command</button>';
-    html += '<button onclick="renameSession(\\'' + s.id + '\\',event)"><span class="menu-icon">\\u270E</span>Rename</button>';
-    html += '<button onclick="previewSession(\\'' + s.id + '\\',event)" id="preview-btn-' + s.id + '"><span class="menu-icon">\\u25BC</span>Preview last turn</button>';
-    html += '<button onclick="summarizeSession(\\'' + s.id + '\\',event)"><span class="menu-icon">\\u2211</span>Summarize</button>';
-    html += '<button onclick="hideSession(\\'' + s.id + '\\',event)"><span class="menu-icon">' + (s.hidden ? '\\u25C9' : '\\u25CE') + '</span>' + (s.hidden ? 'Unhide' : 'Hide') + '</button>';
+    html += '<button onclick="copyResume(\\'' + sid + '\\',event)"><span class="menu-icon">\\u2398</span>Copy resume command</button>';
+    html += '<button onclick="renameSession(\\'' + sid + '\\',event)"><span class="menu-icon">\\u270E</span>Rename</button>';
+    html += '<button onclick="previewSession(\\'' + sid + '\\',event)" id="preview-btn-' + sid + '"><span class="menu-icon">\\u25BC</span>Preview last turn</button>';
+    html += '<button onclick="summarizeSession(\\'' + sid + '\\',event)"><span class="menu-icon">\\u2211</span>Summarize</button>';
+    html += '<button onclick="hideSession(\\'' + sid + '\\',event)"><span class="menu-icon">' + (s.hidden ? '\\u25C9' : '\\u25CE') + '</span>' + (s.hidden ? 'Unhide' : 'Hide') + '</button>';
     html += '</div>';
     html += '</span>';
     html += '</a>';
-    html += '<div class="s-preview" id="preview-' + s.id + '"></div>';
+    html += '<div class="s-preview" id="preview-' + sid + '"></div>';
   }
   if (sorted.length > showCount) {
     html += '<button class="load-more" onclick="showCount+=' + 80 + ';render()">Show more (' + (sorted.length - showCount) + ' remaining)</button>';
@@ -1020,15 +1021,16 @@ function renderByProject(filtered) {
     html += '</div>';
     html += '<div class="group-sessions">';
     for (const s of sessions) {
+      const sid = esc(s.id);
       const hiddenCls = s.hidden ? ' hidden-row' : '';
-      html += '<a class="session-row' + hiddenCls + '" href="/c/' + s.id + '">';
+      html += '<a class="session-row' + hiddenCls + '" href="/c/' + sid + '">';
       html += '<span class="s-project">' + esc(name) + '</span>';
       const titleBit = s.title ? '<span class="s-title">' + esc(s.title) + '</span>' : '';
       const ftsBit = s._ftsMatch ? '<span class="s-fts">' + s._ftsMatch + ' matches</span>' : '';
-      html += '<span class="s-session"><span class="s-id" title="' + s.id + '">' + truncateId(s.id) + '</span>' + titleBit + ftsBit;
+      html += '<span class="s-session"><span class="s-id" title="' + sid + '">' + truncateId(s.id) + '</span>' + titleBit + ftsBit;
       html += '<span class="s-actions">';
-      html += '<button onclick="renameSession(\\'' + s.id + '\\',event)" title="Rename">✎</button>';
-      html += '<button onclick="hideSession(\\'' + s.id + '\\',event)" title="' + (s.hidden ? 'Unhide' : 'Hide') + '">' + (s.hidden ? '◉' : '◎') + '</button>';
+      html += '<button onclick="renameSession(\\'' + sid + '\\',event)" title="Rename">✎</button>';
+      html += '<button onclick="hideSession(\\'' + sid + '\\',event)" title="' + (s.hidden ? 'Unhide' : 'Hide') + '">' + (s.hidden ? '◉' : '◎') + '</button>';
       html += '</span></span>';
       html += '<span class="s-time">' + fmtTime(s.last_modified) + '</span>';
       html += '<span class="s-turns">' + (s.turn_count || '—') + '</span>';
