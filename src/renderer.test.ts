@@ -293,6 +293,30 @@ describe("renderToolResult", () => {
     expect(html).toContain("tool-result-preview");
   });
 
+  it("long JSON-array result gets preview+full with char count", () => {
+    // Glob/Grep results often return long JSON arrays >2000 chars.
+    // These start with "[" so they must NOT go through the agent (markdown) path.
+    const entries = Array.from({ length: 100 }, (_, i) => `"/src/components/features/file-${i}.ts"`).join(",\n");
+    const content = `[\n${entries}\n]`;
+    expect(content.length).toBeGreaterThan(2000);
+
+    const block: ToolResultBlock = {
+      type: "tool_result",
+      content,
+    };
+    const html = renderToolResult(block);
+
+    // Must NOT be treated as agent result
+    expect(html).not.toContain("agent-result");
+    // Must have preview (truncated) AND full content
+    expect(html).toContain("tool-result-preview");
+    expect(html).toContain("tool-result-full");
+    // Must show char count
+    expect(html).toContain("chars)");
+    // Ellipsis in preview
+    expect(html).toContain("\u2026");
+  });
+
   it("escapes </script> in tool result content (prevents page breakout)", () => {
     // Tool results from Read/Bash can contain HTML/JS file contents
     const content = 'const x = 1;\n</script><script>alert("xss")</script>\nconst y = 2;';
