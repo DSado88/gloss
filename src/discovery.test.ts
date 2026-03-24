@@ -331,6 +331,24 @@ describe("discovery", () => {
       expect(sessions[0].fileSize).toBe(0);
     });
 
+    it("handles active session with truncated last line (mid-write)", () => {
+      // During active writes, the file may end with a partial JSON line.
+      // Discovery should still extract metadata from the valid lines
+      // and not crash on the truncated one.
+      const projectDir = path.join(tempDir, "proj");
+      fs.mkdirSync(projectDir, { recursive: true });
+      const content =
+        JSON.stringify({ type: "user", sessionId: "active-write", message: { content: "hello" }, timestamp: "2024-06-01T12:00:00Z" }) +
+        "\n" +
+        '{"type":"assistant","message":{"content":"truncat';  // mid-write
+      fs.writeFileSync(path.join(projectDir, "active.jsonl"), content);
+
+      const { sessions } = scanProjectsDir(tempDir);
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].id).toBe("active-write");
+      expect(sessions[0].startTime).toBe("2024-06-01T12:00:00Z");
+    });
+
     it("does not read entire large files", () => {
       const projectDir = path.join(tempDir, "-Users-test-project1");
       fs.mkdirSync(projectDir, { recursive: true });
