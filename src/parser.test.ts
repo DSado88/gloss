@@ -751,6 +751,24 @@ describe("buildConversation", () => {
 // ---------------------------------------------------------------------------
 
 describe("IncrementalParser incremental feeding", () => {
+  it("single feedLines call with multiple messages returns correct update sequence", () => {
+    // A WebSocket live update might deliver several JSONL lines at once.
+    // The parser should return one TurnUpdate per logical turn change.
+    const parser = new IncrementalParser();
+    const updates = parser.feedLines([
+      JSON.stringify({ type: "user", message: { content: "Q1" }, timestamp: "t1" }),
+      JSON.stringify({ type: "assistant", message: { content: "A1" }, timestamp: "t2" }),
+      JSON.stringify({ type: "user", message: { content: "Q2" }, timestamp: "t3" }),
+    ]);
+
+    // 3 different-role messages → 3 new_turn updates
+    expect(updates).toHaveLength(3);
+    expect(updates[0]).toEqual({ type: "new_turn", turnIndex: 0, turn: expect.objectContaining({ role: "user" }) });
+    expect(updates[1]).toEqual({ type: "new_turn", turnIndex: 1, turn: expect.objectContaining({ role: "assistant" }) });
+    expect(updates[2]).toEqual({ type: "new_turn", turnIndex: 2, turn: expect.objectContaining({ role: "user" }) });
+    expect(parser.getTurns()).toHaveLength(3);
+  });
+
   it("folds tool_result across separate feedLines batches", () => {
     const parser = new IncrementalParser();
 
