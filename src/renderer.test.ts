@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   formatTimestamp,
+  formatDateShort,
+  dateKey,
   renderToolUse,
   renderToolResult,
   renderTurn,
@@ -39,6 +41,56 @@ describe("formatTimestamp", () => {
     // 5 AM UTC — regardless of timezone, the hour should not have a leading zero
     const result = formatTimestamp("2024-03-15T05:05:00Z");
     expect(result).not.toMatch(/^0/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatDateShort
+// ---------------------------------------------------------------------------
+describe("formatDateShort", () => {
+  it("formats a valid timestamp to 'Mon D' format", () => {
+    const result = formatDateShort("2024-03-15T14:30:00Z");
+    // Should produce something like "Mar 15" in local timezone
+    expect(result).toMatch(/^[A-Z][a-z]{2} \d{1,2}$/);
+  });
+
+  it("returns empty string for empty input", () => {
+    expect(formatDateShort("")).toBe("");
+  });
+
+  it("returns empty string for invalid timestamp", () => {
+    expect(formatDateShort("not-a-date")).toBe("");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dateKey
+// ---------------------------------------------------------------------------
+describe("dateKey", () => {
+  it("returns YYYY-MM-DD for a valid timestamp", () => {
+    const result = dateKey("2024-03-15T14:30:00Z");
+    expect(result).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("returns empty string for empty input", () => {
+    expect(dateKey("")).toBe("");
+  });
+
+  it("returns empty string for invalid timestamp", () => {
+    expect(dateKey("garbage")).toBe("");
+  });
+
+  it("same timestamp produces same key", () => {
+    const a = dateKey("2024-06-15T10:00:00Z");
+    const b = dateKey("2024-06-15T10:00:00+00:00");
+    expect(a).toBe(b);
+  });
+
+  it("different dates produce different keys", () => {
+    // Use far-apart dates to avoid timezone edge cases
+    const a = dateKey("2024-01-01T12:00:00Z");
+    const b = dateKey("2024-12-31T12:00:00Z");
+    expect(a).not.toBe(b);
   });
 });
 
