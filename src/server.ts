@@ -898,7 +898,7 @@ export async function handleApiRoute(
   try {
     return await handleApiRouteInner(req, pathname, db, search);
   } catch (err) {
-    if (err instanceof SyntaxError) {
+    if (err instanceof SyntaxError || err instanceof TypeError) {
       return new Response(JSON.stringify({ error: "Invalid JSON in request body" }), {
         status: 400,
         headers: jsonHeaders,

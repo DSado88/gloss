@@ -426,6 +426,17 @@ describe("server routes", () => {
     expect(data.error).toBeDefined();
   });
 
+  it("POST annotation with JSON null body returns 400, not 500", async () => {
+    // JSON.parse("null") returns null. Accessing null.id throws TypeError.
+    // The handler should return 400 (bad request), not 500 (crash).
+    const res = await fetch(`${baseUrl}/api/sessions/${SESSION_ID}/annotations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "null",
+    });
+    expect(res.status).toBe(400);
+  });
+
   it("PUT annotation with malformed JSON returns 400", async () => {
     const res = await fetch(
       `${baseUrl}/api/sessions/${SESSION_ID}/annotations/some-ann-id`,
