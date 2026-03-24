@@ -289,6 +289,14 @@ describe("renderMarkdownInline", () => {
     expect(html).not.toMatch(/file:\/\/\/tmp\/x.*target="_blank"/);
   });
 
+  it("does not inject <br> inside markdown link href attributes", () => {
+    // Bug: link placeholder restoration puts \n back into the text,
+    // then the line break regex adds <br> inside the href attribute.
+    // href="https://example.com/path<br>\nmore" is broken HTML.
+    const html = renderMarkdownInline("[click](https://example.com/path\nwith-newline)");
+    expect(html).not.toMatch(/<a[^>]*<br>/); // no <br> inside <a> attributes
+  });
+
   // --- Auto-linking URLs ---
 
   it("auto-links bare URLs", () => {

@@ -176,7 +176,10 @@ function applyInlineFormatting(text: string): string {
   // Links [text](url) — extract into placeholders to prevent auto-link from
   // double-linking URLs that appear inside the display text of markdown links
   const linkSpans: string[] = [];
-  p = p.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text: string, url: string) => {
+  p = p.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text: string, rawUrl: string) => {
+    // Strip newlines from URL — they break href attributes when the line-break
+    // regex later inserts <br> into the restored link HTML.
+    const url = rawUrl.replace(/\n/g, "");
     if (/^\s*(javascript|data|vbscript)\s*:/i.test(url)) {
       return `${text}`;
     }
