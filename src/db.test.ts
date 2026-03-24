@@ -733,6 +733,56 @@ describe("ConvoDb", () => {
     });
   });
 
+  describe("export → import round-trip", () => {
+    it("preserves annotation fields, tags, and timestamps through export+import cycle", () => {
+      // Create a session with a tagged annotation
+      db.upsertSession({ id: "rt-sess" });
+      db.upsertAnnotation({
+        id: "rt-ann",
+        session_id: "rt-sess",
+        turn_index: 2,
+        block_index: 1,
+        char_start: 10,
+        char_end: 50,
+        text: "important finding",
+        comment: "needs follow-up",
+        kind: "decision",
+        speaker: "assistant",
+        created_at: 1710000000,
+      });
+      db.replaceAnnotationTags("rt-ann", ["bug", "critical"]);
+
+      // Export
+      const exported = db.exportSessionAnnotations("rt-sess");
+      expect(exported).toHaveLength(1);
+
+      // Delete the original
+      db.deleteAnnotation("rt-ann");
+      expect(db.getAnnotation("rt-ann")).toBeNull();
+
+      // Re-import into a new session
+      db.upsertSession({ id: "rt-sess-2" });
+      const result = db.importAnnotationsJson("rt-sess-2", exported);
+      expect(result.imported).toBe(1);
+
+      // Verify all fields survived the round-trip
+      const reimported = db.getAnnotation("rt-ann")!;
+      expect(reimported).not.toBeNull();
+      expect(reimported.turn_index).toBe(2);
+      expect(reimported.block_index).toBe(1);
+      expect(reimported.char_start).toBe(10);
+      expect(reimported.char_end).toBe(50);
+      expect(reimported.text).toBe("important finding");
+      expect(reimported.comment).toBe("needs follow-up");
+      expect(reimported.kind).toBe("decision");
+      expect(reimported.speaker).toBe("assistant");
+      // Timestamp round-trip: created_at 1710000000 → export timestamp 1710000000000ms → import /1000 → 1710000000
+      expect(reimported.created_at).toBe(1710000000);
+      // Tags survived
+      expect(reimported.tags.sort()).toEqual(["bug", "critical"]);
+    });
+  });
+
   // -----------------------------------------------------------------------
   // openDb factory
   // -----------------------------------------------------------------------
