@@ -406,6 +406,14 @@ describe("ConvoDb", () => {
       expect(() => db.searchAnnotations('hello "world')).not.toThrow();
     });
 
+    it("query that sanitizes to empty returns no results, not all annotations", () => {
+      // "OR AND NOT" are all FTS5 operators → sanitize to "" → no FTS clause
+      // Bug: without the fix, the missing FTS clause means NO WHERE filter,
+      // so ALL annotations come back instead of empty results.
+      const results = db.searchAnnotations("OR AND NOT");
+      expect(results).toHaveLength(0);
+    });
+
     it("FTS stays in sync after delete", () => {
       db.deleteAnnotation("ann-alpha");
       const results = db.searchAnnotations("machine learning");

@@ -454,6 +454,10 @@ export class ConvoDb {
       if (safeQuery) {
         clauses.push("a.rowid IN (SELECT rowid FROM annotations_fts WHERE annotations_fts MATCH ?)");
         params.push(safeQuery);
+      } else {
+        // Query was provided but sanitized to empty (all operators/special chars).
+        // Return no results rather than returning everything unfiltered.
+        return [];
       }
     }
 
