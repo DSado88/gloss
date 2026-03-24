@@ -303,10 +303,17 @@ export function decodeProjectDir(encoded: string): string {
   // Other /private/tmp or /var paths — just show last meaningful segment
   if (stripped.startsWith("private-tmp-") || stripped.startsWith("private-var-")) {
     const parts = stripped.split("-");
+    // var-folders paths: private-var-folders-XX-HASH-T-<project>-<timestamp>
+    // Skip past the "T" marker to avoid including structural noise (folders, hash, T)
+    let startIdx = 2; // default: skip "private-tmp" or "private-var"
+    if (parts[2] === "folders") {
+      const tIdx = parts.indexOf("T", 3);
+      if (tIdx >= 0) startIdx = tIdx + 1;
+    }
     // Find the last non-numeric, non-hash segment
-    for (let i = parts.length - 1; i >= 2; i--) {
+    for (let i = parts.length - 1; i >= startIdx; i--) {
       if (parts[i].length > 2 && !/^\d+$/.test(parts[i]) && !/^[0-9a-f]{8,}$/i.test(parts[i]) && !/^01[0-9A-Z]{10,}$/.test(parts[i])) {
-        return parts.slice(2, i + 1).join("-"); // skip "private-tmp"
+        return parts.slice(startIdx, i + 1).join("-");
       }
     }
   }

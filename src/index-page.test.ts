@@ -294,6 +294,20 @@ describe("deriveProjectNames", () => {
     expect(result.project).toBe("ori/orchid-bidi");
   });
 
+  it("non-orchid var-folders path does not include structural noise in dirProject", () => {
+    // macOS /var/folders/XX/HASH/T/project-timestamp → encoded as:
+    // -private-var-folders-6n-<hash>-T-<project>-<timestamp>
+    // Bug: the backward loop finds "myproject" but parts.slice(2, i+1)
+    // includes "folders-6n-hash-T-myproject" instead of just "myproject".
+    const result = deriveProjectNames(
+      null,
+      "/Users/test/.claude/projects/-private-var-folders-6n-pxfdftt92gz067tt08tf1k6m0000gn-T-myproject-1234567890/session.jsonl",
+    );
+    // Should show "myproject", not "folders-6n-...-T-myproject"
+    expect(result.dirProject).not.toContain("folders");
+    expect(result.dirProject).toContain("myproject");
+  });
+
   it("private-tmp with only hash segments does not return empty string", () => {
     // Bug: the backward loop used i >= 0, matching "tmp" at index 1.
     // parts.slice(2, 2) returns [] → join("") → empty string.
