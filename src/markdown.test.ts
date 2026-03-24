@@ -271,6 +271,14 @@ describe("renderMarkdownInline", () => {
     expect(html).not.toContain('href="vbscript:');
   });
 
+  it("rejects javascript: URLs with whitespace before the colon", () => {
+    // Browsers may normalize whitespace in URLs, so "javascript\n:" could
+    // be treated as "javascript:". The sanitizer must catch this variant.
+    const html = renderMarkdownInline("[click](javascript\n:alert(1))");
+    expect(html).not.toContain("<a ");
+    expect(html).not.toContain("href=");
+  });
+
   it("adds target=_blank only to external http/https links", () => {
     const html = renderMarkdownInline("[ext](https://example.com) [rel](./README.md) [file](file:///tmp/x)");
     // External link gets target="_blank"

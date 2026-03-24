@@ -172,7 +172,7 @@ function applyInlineFormatting(text: string): string {
   // double-linking URLs that appear inside the display text of markdown links
   const linkSpans: string[] = [];
   p = p.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text: string, url: string) => {
-    if (/^\s*(javascript|data|vbscript):/i.test(url)) {
+    if (/^\s*(javascript|data|vbscript)\s*:/i.test(url)) {
       return `${text}`;
     }
     const idx = linkSpans.length;
