@@ -286,7 +286,7 @@ export function updateIndex(viewerDir: string): void {
  * The encoding replaces "/" with "-" and prepends "-". We can't perfectly reverse
  * this since "-" is ambiguous, but we can use the known prefix structure.
  */
-function decodeProjectDir(encoded: string): string {
+export function decodeProjectDir(encoded: string): string {
   if (!encoded.startsWith("-")) return encoded;
   // Common structure: -Users-<user>-Documents-Programs-<project>
   // or -Users-<user>-<project>
@@ -327,6 +327,30 @@ function decodeProjectDir(encoded: string): string {
 }
 
 /**
+ * Derive friendly project names from a session's raw project and jsonl_path fields.
+ * Returns { project, fullProject, dirProject } matching the shape used by the index page client.
+ */
+export function deriveProjectNames(rawProject: string | null | undefined, jsonlPath: string | null | undefined): { project: string; fullProject: string; dirProject: string } {
+  let dirProject = "";
+  if (jsonlPath) {
+    const dirName = jsonlPath.split("/").slice(-2, -1)[0] ?? "";
+    dirProject = decodeProjectDir(dirName);
+  }
+  const project = rawProject ?? "";
+  const parts = project.replace(/\/+$/, "").split("/");
+  let shortProject = parts.length >= 1 ? parts[parts.length - 1] : "";
+  // If shortProject looks like a KSUID, timestamp, or hash, prefer dirProject
+  if (/^01[0-9A-Z]{10,}$/.test(shortProject) || /^\d{10,}/.test(shortProject) || /^[0-9a-f]{16,}$/i.test(shortProject)) {
+    shortProject = "";
+  }
+  return {
+    project: shortProject || dirProject || "",
+    fullProject: project,
+    dirProject,
+  };
+}
+
+/**
  * Build an index page from session records (SQLite), for server mode.
  * Default view: flat list of recent sessions. Search filters by project/model/id.
  */
@@ -334,27 +358,12 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
   const cfg = { embeddings_enabled: false, min_turns: 0, resume_enabled: false, terminal_app: "Terminal", resume_dangerous_mode: false, quick_launch_name: "", ...settings };
   const sessionsJson = JSON.stringify(
     sessions.map((s) => {
-      // Decode the JSONL directory to a readable project name
-      let dirProject = "";
-      if (s.jsonl_path) {
-        const dirName = s.jsonl_path.split("/").slice(-2, -1)[0] ?? "";
-        dirProject = decodeProjectDir(dirName);
-      }
-      // Use metadata project's last component, or the decoded dir name
-      const project = s.project ?? "";
-      const parts = project.replace(/\/+$/, "").split("/");
-      let shortProject = parts.length >= 1 ? parts[parts.length - 1] : "";
-      // If shortProject looks like a KSUID, timestamp, or hash, prefer dirProject
-      if (/^01[0-9A-Z]{10,}$/.test(shortProject) || /^\d{10,}/.test(shortProject) || /^[0-9a-f]{16,}$/i.test(shortProject)) {
-        shortProject = "";
-      }
+      const names = deriveProjectNames(s.project, s.jsonl_path);
 
       return {
         id: s.id,
         title: s.title ?? "",
-        project: shortProject || dirProject || "",
-        fullProject: project,
-        dirProject,
+        ...names,
         model: s.model ?? "",
         last_modified: s.last_modified ?? s.start_time ?? 0,
         turn_count: s.turn_count ?? 0,
@@ -1045,8 +1054,8 @@ function render() {
           id: r.id,
           title: r.title || '',
           project: r.project || '',
-          fullProject: r.project || '',
-          dirProject: r.project || '',
+          fullProject: r.fullProject || '',
+          dirProject: r.dirProject || '',
           model: r.model || '',
           last_modified: r.last_modified || 0,
           turn_count: r.turn_count || 0,

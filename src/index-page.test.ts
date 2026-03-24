@@ -8,6 +8,7 @@ import {
   buildIndexPage,
   buildServerIndex,
   updateIndex,
+  deriveProjectNames,
 } from "./index-page.js";
 import type { SessionRecord } from "./db.js";
 
@@ -178,6 +179,60 @@ describe("buildServerIndex project decoding", () => {
     const parsed = JSON.parse(allMatch![1]);
     // Should decode to "myapp", NOT "paul-Documents-Programs-myapp"
     expect(parsed[0].dirProject).toBe("myapp");
+  });
+});
+
+describe("deriveProjectNames", () => {
+  it("extracts friendly name from project path", () => {
+    const result = deriveProjectNames("/Users/david/Documents/Programs/Grocery", null);
+    expect(result.project).toBe("Grocery");
+    expect(result.fullProject).toBe("/Users/david/Documents/Programs/Grocery");
+  });
+
+  it("extracts friendly name from jsonl_path when project is null", () => {
+    const result = deriveProjectNames(null, "/Users/test/.claude/projects/-Users-test-Documents-Programs-TheGeneral/session.jsonl");
+    expect(result.project).toBe("TheGeneral");
+    expect(result.dirProject).toBe("TheGeneral");
+  });
+
+  it("prefers shortProject over dirProject", () => {
+    const result = deriveProjectNames(
+      "/Users/david/Documents/Programs/Grocery",
+      "/Users/test/.claude/projects/-Users-test-Documents-Programs-OtherName/session.jsonl",
+    );
+    expect(result.project).toBe("Grocery");
+  });
+
+  it("falls back to dirProject when project ends in KSUID", () => {
+    const result = deriveProjectNames(
+      "/home/user/01ABCDEFGHIJKLMNOP",
+      "/Users/test/.claude/projects/-Users-test-Documents-Programs-real-project/s.jsonl",
+    );
+    expect(result.project).toBe("real-project");
+  });
+
+  it("returns empty strings for null inputs", () => {
+    const result = deriveProjectNames(null, null);
+    expect(result.project).toBe("");
+    expect(result.fullProject).toBe("");
+    expect(result.dirProject).toBe("");
+  });
+
+  it("matches buildServerIndex output for same inputs", () => {
+    // Verify deriveProjectNames produces the same result as buildServerIndex
+    const sessions: SessionRecord[] = [{
+      id: "consistency-test",
+      project: "/Users/david/Documents/Programs/Grocery",
+      jsonl_path: "/Users/test/.claude/projects/-Users-test-Documents-Programs-Grocery/s.jsonl",
+    }];
+    const html = buildServerIndex(sessions);
+    const allMatch = html.match(/const ALL = (.*?);[\r\n]/s);
+    const parsed = JSON.parse(allMatch![1]);
+
+    const derived = deriveProjectNames(sessions[0].project, sessions[0].jsonl_path);
+    expect(parsed[0].project).toBe(derived.project);
+    expect(parsed[0].fullProject).toBe(derived.fullProject);
+    expect(parsed[0].dirProject).toBe(derived.dirProject);
   });
 });
 

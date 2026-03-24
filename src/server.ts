@@ -1167,10 +1167,11 @@ async function handleApiRouteInner(
       // Enrich with session metadata
       const enriched = results.map((r) => {
         const session = db.getSession(r.session_id);
+        const names = deriveProjectNames(session?.project, session?.jsonl_path);
         return {
           id: r.session_id,
           match_count: r.match_count,
-          project: session?.project ?? "",
+          ...names,
           title: session?.title ?? "",
           model: session?.model ?? "",
           last_modified: session?.last_modified ?? session?.start_time ?? 0,
