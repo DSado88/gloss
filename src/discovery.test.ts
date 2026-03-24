@@ -517,6 +517,33 @@ describe("discovery", () => {
       expect(session.turn_count).toBe(0);
     });
 
+    it("recounts turns when previously empty file (file_size=0) gains content", () => {
+      // A session initially counted with an empty file (turn_count=0, file_size=0).
+      // If the file later gets content, the turn count must be updated.
+      // Bug: `s.file_size && stat.size !== s.file_size` treats file_size=0 as falsy,
+      // skipping the size-change check, so the session is never recounted.
+      const projectDir = path.join(tempDir, "proj");
+      const filePath = path.join(projectDir, "grew-from-empty.jsonl");
+      fs.mkdirSync(projectDir, { recursive: true });
+      // Start with empty file
+      fs.writeFileSync(filePath, "", "utf-8");
+
+      db.upsertSession({ id: "grew-from-empty", jsonl_path: filePath });
+      db.db.run("UPDATE sessions SET turn_count = 0, file_size = 0 WHERE id = ?", ["grew-from-empty"]);
+
+      // Now write real content to the file
+      fs.writeFileSync(filePath, [
+        JSON.stringify({ type: "user", message: { content: "hello" }, timestamp: "2024-01-01T00:00:00Z" }),
+        JSON.stringify({ type: "assistant", message: { content: "hi" }, timestamp: "2024-01-01T00:00:01Z" }),
+      ].join("\n") + "\n", "utf-8");
+
+      backfillTurnCounts(db);
+
+      // turn_count should be updated from 0 to 2 (file grew from 0 bytes)
+      const session = db.getSession("grew-from-empty")!;
+      expect(session.turn_count).toBe(2);
+    });
+
     it("updates path when re-syncing same session with new path", () => {
       syncToDb(db, [
         { id: "s1", path: "/old/path.jsonl", lastModified: Date.now(), fileSize: 100 },
