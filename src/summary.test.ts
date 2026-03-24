@@ -248,6 +248,33 @@ describe("getSummary", () => {
     expect(session?.summary).toBeNull();
   });
 
+  it("clears summary and returns idle when JSONL file is deleted", () => {
+    const f = makeJsonl(dir, "deleted-file", [
+      { role: "user", text: "question" },
+      { role: "assistant", text: "answer" },
+    ]);
+    const mtime = Math.floor(fs.statSync(f).mtimeMs);
+
+    db.upsertSession({ id: "deleted-file", jsonl_path: f });
+    db.setSummaryDone("deleted-file", "Previously generated summary", mtime);
+
+    // Verify summary exists
+    expect(getSummary(db, "deleted-file").status).toBe("done");
+
+    // Delete the file
+    fs.unlinkSync(f);
+
+    // getSummary should detect the missing file, clear the stale summary
+    const result = getSummary(db, "deleted-file");
+    expect(result.status).toBe("idle");
+    expect(result.cached).toBe(false);
+
+    // Verify the DB summary was cleared
+    const session = db.getSession("deleted-file");
+    expect(session?.summary).toBeNull();
+    expect(session?.summary_status).toBe("idle");
+  });
+
   it("returns error for missing session", () => {
     const result = getSummary(db, "nonexistent");
     expect(result.status).toBe("error");
