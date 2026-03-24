@@ -318,6 +318,18 @@ describe("ConvoDb", () => {
         .all("ann-001") as any[];
       expect(rows).toHaveLength(0);
     });
+
+    it("listTags excludes orphan tags with zero annotations", () => {
+      // After deleting all annotations that use a tag, the tag row remains
+      // in the tags table. listTags should NOT include zero-count orphans —
+      // they clutter the UI and confuse users.
+      db.addTag("ann-001", "will-be-orphaned");
+      db.deleteAnnotation("ann-001");
+
+      const tags = db.listTags();
+      const orphan = tags.find((t) => t.name === "will-be-orphaned");
+      expect(orphan).toBeUndefined();
+    });
   });
 
   // -----------------------------------------------------------------------

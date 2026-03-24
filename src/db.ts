@@ -404,6 +404,7 @@ export class ConvoDb {
          FROM tags t
          LEFT JOIN annotation_tags at ON at.tag_id = t.id
          GROUP BY t.id
+         HAVING count > 0
          ORDER BY count DESC, t.name`,
       )
       .all() as TagWithCount[];
