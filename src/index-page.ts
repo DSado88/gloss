@@ -261,7 +261,7 @@ export function updateIndex(viewerDir: string): void {
         `<span class="entry-id">${shortId}</span>` +
         `<span class="entry-project" title="${escapeHtml(project)}">${escapeHtml(projectDisplay)}</span>` +
         `<span class="entry-model">${escapeHtml(modelDisplay)}</span>` +
-        `<span class="entry-time">${timeDisplay}</span>` +
+        `<span class="entry-time">${escapeHtml(timeDisplay)}</span>` +
         `<span class="entry-turns">${turnCount} turns (${userTurns} user)</span>` +
         `</a>`
       );

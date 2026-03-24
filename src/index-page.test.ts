@@ -440,6 +440,34 @@ describe("updateIndex", () => {
     expect(content).toContain("real");
   });
 
+  it("escapes start_time in entry-time span (XSS via invalid timestamp fallback)", () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "convo-test-"));
+
+    // A malicious start_time that triggers the formatIndexTime fallback path
+    // (invalid date → returns first 16 chars unescaped)
+    const meta = JSON.stringify({
+      session_id: "xss-time",
+      short_id: "xss",
+      project_dir: "/tmp",
+      model: "claude-3",
+      start_time: '<img src=x onerror=alert(1)>',
+      turn_count: 1,
+      user_turns: 1,
+    });
+    fs.writeFileSync(
+      path.join(tmpDir, "xss-time.html"),
+      `<!-- CONVO_META:${meta} -->\n<html></html>`,
+    );
+
+    updateIndex(tmpDir);
+
+    const content = fs.readFileSync(path.join(tmpDir, "index.html"), "utf-8");
+    // The entry-time span must NOT contain raw <img> tag
+    expect(content).not.toContain("<img");
+    // Should be HTML-escaped
+    expect(content).toContain("&lt;img");
+  });
+
   it("produces empty-state when no conversation files exist", () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "convo-test-"));
 
