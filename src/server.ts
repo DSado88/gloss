@@ -1031,8 +1031,11 @@ async function handleApiRouteInner(
     const url = new URL(req.url);
     const startParam = url.searchParams.get("start");
     const endParam = url.searchParams.get("end");
-    const start = startParam != null ? Math.max(0, parseInt(startParam, 10)) : 0;
-    const end = endParam != null ? Math.min(parseInt(endParam, 10), allTurns.length - 1) : allTurns.length - 1;
+    const maxIdx = Math.max(0, allTurns.length - 1);
+    const rawStart = startParam != null ? parseInt(startParam, 10) : 0;
+    const rawEnd = endParam != null ? parseInt(endParam, 10) : allTurns.length - 1;
+    const start = Math.max(0, Math.min(isNaN(rawStart) ? 0 : rawStart, maxIdx));
+    const end = Math.max(start, Math.min(isNaN(rawEnd) ? maxIdx : rawEnd, maxIdx));
     const slice = allTurns.slice(start, end + 1);
 
     const convoData = slice.map((turn) => ({
@@ -1042,7 +1045,7 @@ async function handleApiRouteInner(
         .filter((b): b is TextBlock => b.type === "text")
         .map((b) => b.text || ""),
     }));
-    const meta = { totalTurns: allTurns.length, start, end: Math.min(end, allTurns.length - 1) };
+    const meta = { totalTurns: allTurns.length, start, end };
     return new Response(JSON.stringify({ turns: convoData, ...meta }), { headers: jsonHeaders });
   }
 

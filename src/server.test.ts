@@ -450,6 +450,27 @@ describe("server routes", () => {
     expect(data.totalTurns).toBeGreaterThan(0);
   });
 
+  it("GET /api/sessions/:id/data clamps out-of-range start/end params", async () => {
+    // start > totalTurns should be clamped so metadata stays consistent
+    const res = await fetch(`${baseUrl}/api/sessions/${SESSION_ID}/data?start=999`);
+    expect(res.status).toBe(200);
+    const data = await res.json() as any;
+    // start should be clamped to a valid index (not exceed totalTurns - 1)
+    expect(data.start).toBeLessThanOrEqual(data.totalTurns - 1);
+    expect(data.start).toBeGreaterThanOrEqual(0);
+    // end should not be less than start
+    expect(data.end).toBeGreaterThanOrEqual(data.start);
+    expect(data.end).toBeLessThanOrEqual(data.totalTurns - 1);
+  });
+
+  it("GET /api/sessions/:id/data handles negative end param gracefully", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions/${SESSION_ID}/data?end=-1`);
+    expect(res.status).toBe(200);
+    const data = await res.json() as any;
+    // Negative end should be clamped to 0, not produce confusing metadata
+    expect(data.end).toBeGreaterThanOrEqual(0);
+  });
+
   it("GET /api/sessions/:id/data returns 404 JSON for nonexistent session", async () => {
     const res = await fetch(`${baseUrl}/api/sessions/nonexistent-xyz/data`);
     expect(res.status).toBe(404);
