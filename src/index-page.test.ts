@@ -526,6 +526,34 @@ describe("updateIndex", () => {
     expect(content).toContain("&lt;img");
   });
 
+  it("coerces turn_count/user_turns to numbers (XSS via crafted CONVO_META)", () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "convo-test-"));
+
+    // A crafted HTML file where turn_count is a string containing HTML
+    const meta = JSON.stringify({
+      session_id: "xss-turns",
+      short_id: "xss",
+      project_dir: "/tmp",
+      model: "claude-3",
+      start_time: "2024-01-01T00:00:00Z",
+      turn_count: '<img src=x onerror=alert(1)>',
+      user_turns: '<script>alert(2)</script>',
+    });
+    fs.writeFileSync(
+      path.join(tmpDir, "xss-turns.html"),
+      `<!-- CONVO_META:${meta} -->\n<html></html>`,
+    );
+
+    updateIndex(tmpDir);
+
+    const content = fs.readFileSync(path.join(tmpDir, "index.html"), "utf-8");
+    // Must NOT contain raw HTML from turn_count or user_turns
+    expect(content).not.toContain("<img");
+    expect(content).not.toContain("<script");
+    // Should show a safe numeric value (0 or NaN, not the HTML payload)
+    expect(content).toMatch(/\d+ turns \(\d+ user\)/);
+  });
+
   it("produces empty-state when no conversation files exist", () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "convo-test-"));
 

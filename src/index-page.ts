@@ -252,8 +252,8 @@ export function updateIndex(viewerDir: string): void {
       }
       const modelDisplay = shortenModel(meta.model ?? "");
       const timeDisplay = formatIndexTime(meta.start_time ?? "");
-      const turnCount = meta.turn_count ?? 0;
-      const userTurns = meta.user_turns ?? 0;
+      const turnCount = Number(meta.turn_count) || 0;
+      const userTurns = Number(meta.user_turns) || 0;
       const filename = meta._filename;
 
       return (
