@@ -38,6 +38,19 @@ describe("shortenModel", () => {
     expect(shortenModel("anthropic/claude-3-5-sonnet-20241022")).toBe("3-5-sonnet");
     expect(shortenModel("anthropic/claude-opus-4-20250514")).toBe("opus-4");
   });
+
+  it("handles newer model IDs with context annotations", () => {
+    // claude-opus-4-6[1m] style — no date suffix, has bracket annotation
+    expect(shortenModel("claude-opus-4-6")).toBe("opus-4-6");
+    // With context annotation brackets — should preserve (not a date suffix)
+    const result = shortenModel("claude-sonnet-4-6");
+    expect(result).toBe("sonnet-4-6");
+  });
+
+  it("handles haiku models", () => {
+    expect(shortenModel("claude-haiku-4-5-20251001")).toBe("haiku-4-5");
+    expect(shortenModel("anthropic/claude-haiku-4-5-20251001")).toBe("haiku-4-5");
+  });
 });
 
 describe("formatIndexTime", () => {
