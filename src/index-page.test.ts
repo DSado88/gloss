@@ -268,6 +268,19 @@ describe("deriveProjectNames", () => {
     expect(result.project).toBe("ori/orchid-bidi");
   });
 
+  it("private-tmp with only hash segments does not return empty string", () => {
+    // Bug: the backward loop used i >= 0, matching "tmp" at index 1.
+    // parts.slice(2, 2) returns [] → join("") → empty string.
+    // The loop should stop at i >= 2 to skip "private" and "tmp".
+    const result = deriveProjectNames(
+      null,
+      "/Users/test/.claude/projects/-private-tmp-abc12345678/session.jsonl",
+    );
+    // With no meaningful non-hash segment after "private-tmp-", should fall
+    // through to knownPrefixes or return the full stripped string — NOT "".
+    expect(result.dirProject).not.toBe("");
+  });
+
   it("handles Linux-style /home/ paths in dirProject (no crash, reasonable fallback)", () => {
     // decodeProjectDir only handles Users- prefixes (macOS). Linux paths
     // like -home-user-project should fall through without crashing, returning

@@ -304,7 +304,7 @@ export function decodeProjectDir(encoded: string): string {
   if (stripped.startsWith("private-tmp-") || stripped.startsWith("private-var-")) {
     const parts = stripped.split("-");
     // Find the last non-numeric, non-hash segment
-    for (let i = parts.length - 1; i >= 0; i--) {
+    for (let i = parts.length - 1; i >= 2; i--) {
       if (parts[i].length > 2 && !/^\d+$/.test(parts[i]) && !/^[0-9a-f]{8,}$/i.test(parts[i]) && !/^01[0-9A-Z]{10,}$/.test(parts[i])) {
         return parts.slice(2, i + 1).join("-"); // skip "private-tmp"
       }
