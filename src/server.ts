@@ -1283,7 +1283,8 @@ async function handleApiRouteInner(
     const sessionId = url.searchParams.get("session") ?? undefined;
     const tag = url.searchParams.get("tag") ?? undefined;
     const days = parseInt(url.searchParams.get("days") ?? "0", 10);
-    const limit = Math.min(parseInt(url.searchParams.get("limit") ?? "30", 10), 200);
+    const rawHighlightLimit = parseInt(url.searchParams.get("limit") ?? "30", 10);
+    const limit = Math.max(0, Math.min(Number.isNaN(rawHighlightLimit) ? 30 : rawHighlightLimit, 200));
 
     // Start with the broadest applicable query, then filter in memory
     let results;

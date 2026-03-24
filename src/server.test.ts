@@ -643,6 +643,13 @@ describe("server routes", () => {
     expect(Array.isArray(data)).toBe(true);
   });
 
+  it("GET /api/highlights with NaN limit does not crash", async () => {
+    const res = await fetch(`${baseUrl}/api/highlights?limit=abc`);
+    expect(res.status).toBe(200);
+    const data = await res.json() as any[];
+    expect(Array.isArray(data)).toBe(true);
+  });
+
   // -----------------------------------------------------------------------
   // Sessions list API
   // -----------------------------------------------------------------------
