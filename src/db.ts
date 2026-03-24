@@ -448,9 +448,11 @@ export class ConvoDb {
     const clauses: string[] = [];
     const params: SQLQueryBindings[] = [];
 
-    // FTS match — sanitize special chars to prevent FTS5 syntax errors
-    if (query) {
-      const safeQuery = this.sanitizeFtsQuery(query);
+    // FTS match — sanitize special chars to prevent FTS5 syntax errors.
+    // Trim first so whitespace-only queries are treated as "no query" (not "empty match").
+    const trimmedQuery = query.trim();
+    if (trimmedQuery) {
+      const safeQuery = this.sanitizeFtsQuery(trimmedQuery);
       if (safeQuery) {
         clauses.push("a.rowid IN (SELECT rowid FROM annotations_fts WHERE annotations_fts MATCH ?)");
         params.push(safeQuery);

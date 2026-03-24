@@ -447,6 +447,16 @@ describe("ConvoDb", () => {
       expect(results).toHaveLength(0);
     });
 
+    it("whitespace-only query with sessionId filter still returns session annotations", () => {
+      // Bug: " " is truthy → enters FTS path → sanitizes to "" → early return []
+      // This discards the sessionId filter entirely, returning nothing.
+      // Fix: treat whitespace-only queries as "no query" (skip FTS, apply other filters).
+      const results = db.searchAnnotations("   ", { sessionId: "sess-001" });
+      // Should return annotations for sess-001, not empty array
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0].session_id).toBe("sess-001");
+    });
+
     it("FTS stays in sync after delete", () => {
       db.deleteAnnotation("ann-alpha");
       const results = db.searchAnnotations("machine learning");
