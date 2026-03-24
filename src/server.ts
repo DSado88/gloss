@@ -1246,15 +1246,16 @@ async function handleApiRouteInner(
   if (pathname === "/api/sessions" && req.method === "GET") {
     const url = new URL(req.url);
     const project = url.searchParams.get("project") ?? undefined;
-    const limit = parseInt(url.searchParams.get("limit") ?? "20", 10);
+    const rawLimit = parseInt(url.searchParams.get("limit") ?? "20", 10);
+    const limit = Math.max(0, Math.min(Number.isNaN(rawLimit) ? 20 : rawLimit, 200));
     // When filtering by project, fetch more rows then filter — avoids
     // LIMIT cutting off matches that appear later in the sort order.
-    let allSessions = db.listSessions(project ? {} : { limit: Math.min(limit, 200) });
+    let allSessions = db.listSessions(project ? {} : { limit });
     if (project) {
       const q = project.toLowerCase();
       allSessions = allSessions
         .filter((s) => (s.project ?? "").toLowerCase().includes(q))
-        .slice(0, Math.min(limit, 200));
+        .slice(0, limit);
     }
     const out = allSessions.map((s) => ({
       id: s.id,

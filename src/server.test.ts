@@ -663,4 +663,22 @@ describe("server routes", () => {
     const data = await res.json() as any[];
     expect(data).toEqual([]);
   });
+
+  it("GET /api/sessions with negative limit does not bypass server cap", async () => {
+    // SQLite treats LIMIT -1 as "no limit" — the server must clamp to [0, 200]
+    const res = await fetch(`${baseUrl}/api/sessions?limit=-1`);
+    expect(res.status).toBe(200);
+    const data = await res.json() as any[];
+    // Should NOT get unlimited results — must be capped
+    expect(data.length).toBeLessThanOrEqual(200);
+    // With our fixture's 1 session, this just verifies it doesn't crash
+    expect(data.length).toBeGreaterThanOrEqual(0);
+  });
+
+  it("GET /api/sessions with NaN limit uses default", async () => {
+    const res = await fetch(`${baseUrl}/api/sessions?limit=abc`);
+    expect(res.status).toBe(200);
+    const data = await res.json() as any[];
+    expect(Array.isArray(data)).toBe(true);
+  });
 });
