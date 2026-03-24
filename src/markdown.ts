@@ -136,7 +136,12 @@ function applyAutoLinks(text: string): string {
   // Auto-link file paths
   text = text.replace(
     /(?<!["\w])(\/(?:Users|private|tmp|var|opt|etc|home)[\/\w._-]+(?:\.\w+)?|~\/[\/\w._-]+(?:\.\w+)?)/g,
-    (_, p1: string) => linkFilepath(p1),
+    (_, p1: string) => {
+      // Strip trailing sentence punctuation (same logic as URL auto-linking)
+      const cleaned = p1.replace(/[.,:!?]+$/, "");
+      const trailing = p1.slice(cleaned.length);
+      return linkFilepath(cleaned) + trailing;
+    },
   );
   return text;
 }

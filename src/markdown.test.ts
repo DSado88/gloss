@@ -345,6 +345,14 @@ describe("renderMarkdownInline", () => {
     expect(html).toContain("file:///Users/alice/file.txt");
   });
 
+  it("does not include trailing sentence punctuation in auto-linked file paths", () => {
+    // Like URL auto-linking, trailing . or , should not be part of the file link.
+    // "See /Users/alice/file.txt." → the trailing "." is sentence punctuation.
+    const html = renderMarkdownInline("See /Users/alice/file.txt.");
+    expect(html).toContain('href="file:///Users/alice/file.txt"');
+    expect(html).not.toContain('href="file:///Users/alice/file.txt."');
+  });
+
   it("auto-links ~/ paths", () => {
     const html = renderMarkdownInline("see ~/docs/readme.md");
     expect(html).toContain('class="file-link"');
