@@ -122,7 +122,20 @@ export async function generateSummary(db: ConvoDb, sessionId: string): Promise<S
  */
 export function buildExcerpt(jsonlPath: string): string | null {
   try {
-    const content = fs.readFileSync(jsonlPath, "utf-8");
+    // Read first 32KB + last 32KB for large files (enough for first/last turns)
+    const stat = fs.statSync(jsonlPath);
+    let content: string;
+    if (stat.size > 128 * 1024) {
+      const fd = fs.openSync(jsonlPath, "r");
+      const headBuf = Buffer.alloc(32 * 1024);
+      const tailBuf = Buffer.alloc(32 * 1024);
+      fs.readSync(fd, headBuf, 0, headBuf.length, 0);
+      fs.readSync(fd, tailBuf, 0, tailBuf.length, Math.max(0, stat.size - tailBuf.length));
+      fs.closeSync(fd);
+      content = headBuf.toString("utf-8") + "\n" + tailBuf.toString("utf-8");
+    } else {
+      content = fs.readFileSync(jsonlPath, "utf-8");
+    }
     const parser = new IncrementalParser();
     parser.feedLines(content.split("\n"));
     const turns = parser.getTurns();
