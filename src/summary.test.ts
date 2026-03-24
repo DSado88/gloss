@@ -77,6 +77,38 @@ describe("buildExcerpt", () => {
     expect(excerpt).not.toContain("Turn 5");
   });
 
+  it("includes all 3 turns for exactly 3-turn conversation (no skipping)", () => {
+    // Boundary case: with 3 turns, first 2 + last 2 = {0,1,1,2} → dedup → {0,1,2} = all turns
+    const f = makeJsonl(dir, "three-turns", [
+      { role: "user", text: "First question" },
+      { role: "assistant", text: "First answer" },
+      { role: "user", text: "Follow-up question" },
+    ]);
+    const excerpt = buildExcerpt(f);
+    expect(excerpt).not.toBeNull();
+    expect(excerpt).toContain("[User] First question");
+    expect(excerpt).toContain("[Claude] First answer");
+    expect(excerpt).toContain("[User] Follow-up question");
+  });
+
+  it("skips middle turn for exactly 5-turn conversation", () => {
+    // With 5 turns, first 2 + last 2 = {0,1,3,4} — turn 2 is skipped
+    const f = makeJsonl(dir, "five-turns", [
+      { role: "user", text: "Turn_0_first" },
+      { role: "assistant", text: "Turn_1_second" },
+      { role: "user", text: "Turn_2_MIDDLE_SKIP" },
+      { role: "assistant", text: "Turn_3_fourth" },
+      { role: "user", text: "Turn_4_fifth" },
+    ]);
+    const excerpt = buildExcerpt(f);
+    expect(excerpt).not.toBeNull();
+    expect(excerpt).toContain("Turn_0_first");
+    expect(excerpt).toContain("Turn_1_second");
+    expect(excerpt).not.toContain("Turn_2_MIDDLE_SKIP");
+    expect(excerpt).toContain("Turn_3_fourth");
+    expect(excerpt).toContain("Turn_4_fifth");
+  });
+
   it("returns null for conversation with only tool calls (no text)", () => {
     // Some conversations are purely tool-driven with no user text or assistant text
     const f = path.join(dir, "tools-only.jsonl");
