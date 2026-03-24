@@ -123,6 +123,75 @@ describe("IncrementalParser — live update scenarios", () => {
     expect(parser.getTurns().length).toBe(4);
   });
 
+  it("folds tool-result-only user messages into preceding assistant turn", () => {
+    const parser = new IncrementalParser();
+
+    parser.feedLines([
+      makeSummaryLine(),
+      makeUserLine("Hello"),
+    ]);
+    expect(parser.getTurns().length).toBe(1); // user
+
+    // Assistant with tool use
+    parser.feedLines([
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            { type: "text", text: "Let me check." },
+            { type: "tool_use", id: "tu1", name: "Read", input: { file_path: "/test.ts" } },
+          ],
+          model: "claude-sonnet-4-20250514",
+        },
+        timestamp: "2024-01-15T10:30:05Z",
+      }),
+    ]);
+    expect(parser.getTurns().length).toBe(2); // user + assistant
+
+    // User message with only tool results — should fold into assistant turn
+    const toolResultMsg = JSON.stringify({
+      type: "user",
+      message: {
+        content: [
+          { type: "tool_result", tool_use_id: "tu1", content: "file contents here" },
+        ],
+      },
+      timestamp: "2024-01-15T10:30:06Z",
+    });
+    const updates = parser.feedLines([toolResultMsg]);
+
+    // Should merge into the assistant turn, not create a new user turn
+    expect(parser.getTurns().length).toBe(2);
+    expect(updates.length).toBe(1);
+    expect(updates[0].type).toBe("update_turn");
+    // The assistant turn should now have the tool result block
+    const assistantTurn = parser.getTurns()[1];
+    expect(assistantTurn.role).toBe("assistant");
+    expect(assistantTurn.blocks.some(b => b.type === "tool_result")).toBe(true);
+  });
+
+  it("does not fold tool results when no preceding assistant turn", () => {
+    const parser = new IncrementalParser();
+
+    // First message is a user message with only tool results (unusual but possible)
+    const toolResultMsg = JSON.stringify({
+      type: "user",
+      message: {
+        content: [
+          { type: "tool_result", tool_use_id: "tu1", content: "some result" },
+        ],
+      },
+      timestamp: "2024-01-15T10:30:00Z",
+    });
+
+    const updates = parser.feedLines([toolResultMsg]);
+
+    // No preceding assistant turn → creates a standalone user turn
+    expect(parser.getTurns().length).toBe(1);
+    expect(parser.getTurns()[0].role).toBe("user");
+    expect(updates[0].type).toBe("new_turn");
+  });
+
   it("skips system-noise-only user messages without creating empty turns", () => {
     const parser = new IncrementalParser();
 
