@@ -318,6 +318,17 @@ describe("renderMarkdownInline", () => {
     expect(html2).toContain(">https://example.com/api?a=1&amp;b=2</a>");
   });
 
+  it("does not break HTML entities when stripping trailing punctuation from URLs", () => {
+    // When user writes <https://example.com>, escape() turns > to &gt;.
+    // The trailing-punctuation stripper must not rip the ; from &gt;, which
+    // would produce a broken entity (&gt without semicolon) in the href.
+    const html = renderMarkdownInline("see <https://example.com> here");
+    // The URL should not contain a broken &gt entity
+    expect(html).not.toContain('href="https://example.com&gt"');
+    // The &gt; entity in the link text should remain intact (not split)
+    expect(html).not.toMatch(/&gt<\/a>;/);
+  });
+
   // --- Auto-linking file paths ---
 
   it("auto-links /Users/ paths", () => {

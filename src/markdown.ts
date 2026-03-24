@@ -125,8 +125,10 @@ function applyAutoLinks(text: string): string {
   text = text.replace(
     /(?<!href=")(?<!">)(https?:\/\/[^\s<>)]+)/g,
     (_, url: string) => {
-      // Strip trailing sentence punctuation that isn't part of the URL
-      const cleaned = url.replace(/[.,;:!?]+$/, "");
+      // Strip trailing sentence punctuation that isn't part of the URL.
+      // Excludes ; because after HTML escaping, > becomes &gt; and stripping
+      // the ; would break the entity into &gt (without semicolon).
+      const cleaned = url.replace(/[.,:!?]+$/, "");
       const trailing = url.slice(cleaned.length);
       return `<a href="${cleaned}" target="_blank" rel="noopener">${cleaned}</a>${trailing}`;
     },
