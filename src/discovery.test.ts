@@ -449,6 +449,44 @@ describe("discovery", () => {
       expect(db.ftsIndexedCount()).toBe(0);
     });
 
+    it("backfillFtsIndex handles tool-only conversations (no text blocks)", () => {
+      // A conversation with only tool_use and tool_result blocks produces
+      // turns where all text is empty after filtering to type="text" blocks.
+      // FTS indexing should still mark it as indexed without crashing.
+      const projectDir = path.join(tempDir, "proj");
+      const filePath = path.join(projectDir, "tools-only.jsonl");
+      fs.mkdirSync(projectDir, { recursive: true });
+      const lines = [
+        JSON.stringify({
+          type: "user",
+          message: { content: [
+            { type: "tool_result", tool_use_id: "tu1", content: "file contents" },
+          ] },
+          timestamp: "2024-01-15T10:00:00Z",
+        }),
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [
+            { type: "tool_use", id: "tu2", name: "Bash", input: { command: "ls" } },
+          ] },
+          timestamp: "2024-01-15T10:00:01Z",
+        }),
+      ];
+      fs.writeFileSync(filePath, lines.join("\n") + "\n", "utf-8");
+
+      db.upsertSession({ id: "tools-only", jsonl_path: filePath });
+      backfillFtsIndex(db);
+
+      // Session should be marked as indexed (not re-indexed every cycle)
+      expect(db.ftsIndexedCount()).toBe(1);
+      const mtime = Math.floor(fs.statSync(filePath).mtimeMs / 1000);
+      expect(db.ftsNeedsIndexing("tools-only", mtime)).toBe(false);
+
+      // Searching should return no results (no text to match)
+      const results = db.searchSessions("file contents", 10);
+      expect(results.length).toBe(0);
+    });
+
     it("backfillTurnCounts stores turn_count=0 for files with no turns", () => {
       // A JSONL with only a summary line and no user/assistant messages
       const projectDir = path.join(tempDir, "proj");
