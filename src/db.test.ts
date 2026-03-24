@@ -131,6 +131,15 @@ describe("ConvoDb", () => {
       expect(() => db.listSessions({ offset: 1 })).not.toThrow();
     });
 
+    it("listSessions with limit: 0 returns no results", () => {
+      for (let i = 0; i < 3; i++) {
+        db.upsertSession({ id: `lim0-${i}` });
+      }
+      // limit: 0 should mean "no results" — not "unlimited"
+      const results = db.listSessions({ limit: 0 });
+      expect(results).toHaveLength(0);
+    });
+
     it("listSessions filters hidden sessions by default", () => {
       db.upsertSession({ id: "visible" });
       db.upsertSession({ id: "hidden-one" });

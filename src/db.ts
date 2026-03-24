@@ -297,7 +297,7 @@ export class ConvoDb {
     if (clauses.length) sql += " WHERE " + clauses.join(" AND ");
     sql += " ORDER BY coalesce(last_modified, imported_at) DESC";
 
-    if (opts?.limit) {
+    if (opts?.limit != null) {
       sql += " LIMIT ?";
       params.push(opts.limit);
       if (opts?.offset) {
