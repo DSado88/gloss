@@ -91,6 +91,46 @@ describe("buildExcerpt", () => {
     expect(excerpt).toContain("[User] Follow-up question");
   });
 
+  it("includes all 4 turns for exactly 4-turn conversation (first 2 + last 2 = all)", () => {
+    // Boundary: with 4 turns, first 2 + last 2 = {0,1,2,3} = all
+    const f = makeJsonl(dir, "four-turns", [
+      { role: "user", text: "Turn_0" },
+      { role: "assistant", text: "Turn_1" },
+      { role: "user", text: "Turn_2" },
+      { role: "assistant", text: "Turn_3" },
+    ]);
+    const excerpt = buildExcerpt(f);
+    expect(excerpt).not.toBeNull();
+    expect(excerpt).toContain("Turn_0");
+    expect(excerpt).toContain("Turn_1");
+    expect(excerpt).toContain("Turn_2");
+    expect(excerpt).toContain("Turn_3");
+  });
+
+  it("skips tool-only turns in excerpt (no text blocks to include)", () => {
+    // A turn with only tool_use blocks has no text to contribute.
+    // buildExcerpt should skip it gracefully (text.trim() is empty → skipped).
+    const f = path.join(dir, "tool-only-turn.jsonl");
+    const lines = [
+      JSON.stringify({ type: "user", message: { content: "Fix the bug" }, sessionId: "x", timestamp: "t0" }),
+      JSON.stringify({ type: "assistant", message: { content: [
+        { type: "tool_use", id: "tu1", name: "Read", input: { file_path: "/f" } },
+      ] }, timestamp: "t1" }),
+      JSON.stringify({ type: "user", message: { content: [
+        { type: "tool_result", tool_use_id: "tu1", content: "data" },
+      ] }, timestamp: "t2" }),
+      JSON.stringify({ type: "assistant", message: { content: "Fixed it." }, timestamp: "t3" }),
+    ];
+    fs.writeFileSync(f, lines.join("\n") + "\n");
+    const excerpt = buildExcerpt(f);
+    expect(excerpt).not.toBeNull();
+    expect(excerpt).toContain("[User] Fix the bug");
+    expect(excerpt).toContain("[Claude] Fixed it.");
+    // Tool content should NOT appear in excerpt
+    expect(excerpt).not.toContain("/f");
+    expect(excerpt).not.toContain("data");
+  });
+
   it("skips middle turn for exactly 5-turn conversation", () => {
     // With 5 turns, first 2 + last 2 = {0,1,3,4} — turn 2 is skipped
     const f = makeJsonl(dir, "five-turns", [
