@@ -339,6 +339,28 @@ server.tool(
   },
 );
 
+// ── Tool: list_tags ────────────────────────────────────────────────────────
+
+server.tool(
+  "list_tags",
+  "List all annotation tags with usage counts. " +
+    "Use this to discover available tags before filtering highlights with get_highlights(tag=...).",
+  {},
+  async () => {
+    const res = await fetch(`${BASE}/api/tags`);
+    if (!res.ok) return { content: [{ type: "text" as const, text: "Failed to fetch tags" }] };
+    const tags = (await res.json()) as Array<{ name: string; count: number; color?: string }>;
+    if (tags.length === 0) {
+      return { content: [{ type: "text" as const, text: "No tags found. Highlights haven't been tagged yet." }] };
+    }
+    const lines = [`${tags.length} tags:\n`];
+    for (const t of tags) {
+      lines.push(`  ${t.name} (${t.count})`);
+    }
+    return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+  },
+);
+
 // ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------

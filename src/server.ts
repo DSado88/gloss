@@ -10,7 +10,7 @@ import { renderTurn } from "./renderer.js";
 import { escape } from "./markdown.js";
 import { openDb, type ConvoDb } from "./db.js";
 import { scanProjectsDir, syncToDb, backfillTurnCounts, backfillFtsIndex } from "./discovery.js";
-import { buildServerIndex } from "./index-page.js";
+import { buildServerIndex, deriveProjectNames } from "./index-page.js";
 import { buildToolViewerPage, buildMemoryPage } from "./tool-viewer.js";
 import { EmbeddingEngine, VectorIndex } from "./embeddings.js";
 import { backfillEmbeddings } from "./indexer.js";
@@ -1262,6 +1262,12 @@ async function handleApiRouteInner(
       file_size: s.file_size ?? 0,
     }));
     return new Response(JSON.stringify(out), { headers: jsonHeaders });
+  }
+
+  // GET /api/tags — list all annotation tags with counts
+  if (pathname === "/api/tags" && req.method === "GET") {
+    const tags = db.listTags();
+    return new Response(JSON.stringify(tags), { headers: jsonHeaders });
   }
 
   // GET /api/highlights?q=...&session=...&tag=...&days=...&limit=...
