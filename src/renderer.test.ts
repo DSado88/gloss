@@ -785,4 +785,26 @@ describe("renderTurn", () => {
     const { html } = renderTurn(turn, 0, true, true);
     expect(html).not.toContain("date-divider");
   });
+
+  it("returns empty html and null tocEntry for turn with empty blocks array", () => {
+    const turn: Turn = {
+      role: "user",
+      timestamp: "2024-01-15T10:00:00Z",
+      blocks: [],
+    };
+    const { html, tocEntry } = renderTurn(turn, 0, true, true);
+    expect(html).toBe("");
+    expect(tocEntry).toBeNull();
+  });
+
+  it("shows date divider on first turn (no prevTimestamp)", () => {
+    const turn: Turn = {
+      role: "user",
+      timestamp: "2024-03-15T10:00:00Z",
+      blocks: [{ type: "text", text: "First message" }],
+    };
+    // First turn has no prevTimestamp — date divider should appear
+    const { html } = renderTurn(turn, 0, true, true);
+    expect(html).toContain("date-divider");
+  });
 });
