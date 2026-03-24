@@ -278,6 +278,37 @@ describe("renderToolResult", () => {
     expect(html).toContain("tool-result-meta");
     expect(html).toContain("Duration: 1.5s");
   });
+
+  it("escapes </script> in tool result content (prevents page breakout)", () => {
+    // Tool results from Read/Bash can contain HTML/JS file contents
+    const content = 'const x = 1;\n</script><script>alert("xss")</script>\nconst y = 2;';
+    const block: ToolResultBlock = {
+      type: "tool_result",
+      content,
+    };
+    const html = renderToolResult(block);
+    // Must NOT contain raw </script> — that would close the page's script context
+    expect(html).not.toContain("</script>");
+    expect(html).not.toContain("<script>");
+    // Content should be escaped
+    expect(html).toContain("&lt;");
+  });
+
+  it("escapes </script> in large agent-style tool results (markdown path)", () => {
+    // Agent results >500 chars go through renderMarkdownInline instead of escape()
+    const content = "Here is the analysis:\n".repeat(30) +
+      '</script><script>alert("xss")</script>\n' +
+      "Conclusion: everything is fine.\n".repeat(10);
+    const block: ToolResultBlock = {
+      type: "tool_result",
+      content,
+    };
+    const html = renderToolResult(block);
+    expect(html).toContain("agent-result");
+    // Must NOT contain raw script tags
+    expect(html).not.toMatch(/<script[\s>]/i);
+    expect(html).not.toMatch(/<\/script>/i);
+  });
 });
 
 // ---------------------------------------------------------------------------
