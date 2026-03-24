@@ -255,6 +255,30 @@ describe("deriveProjectNames", () => {
     expect(result.project).toBe("ori/orchid-bidi");
   });
 
+  it("handles Linux-style /home/ paths in dirProject (no crash, reasonable fallback)", () => {
+    // decodeProjectDir only handles Users- prefixes (macOS). Linux paths
+    // like -home-user-project should fall through without crashing, returning
+    // the stripped string as the dirProject.
+    const result = deriveProjectNames(
+      null,
+      "/home/user/.claude/projects/-home-user-my-project/session.jsonl",
+    );
+    // No special decoding for /home/ paths, so it returns the full stripped string
+    expect(result.dirProject).toBe("home-user-my-project");
+    // With no rawProject, falls back to dirProject
+    expect(result.project).toBe("home-user-my-project");
+  });
+
+  it("handles Linux path with rawProject set (rawProject takes precedence)", () => {
+    const result = deriveProjectNames(
+      "/home/user/my-project",
+      "/home/user/.claude/projects/-home-user-my-project/session.jsonl",
+    );
+    // rawProject's last segment "my-project" should be preferred
+    expect(result.project).toBe("my-project");
+    expect(result.fullProject).toBe("/home/user/my-project");
+  });
+
   it("matches buildServerIndex output for same inputs", () => {
     // Verify deriveProjectNames produces the same result as buildServerIndex
     const sessions: SessionRecord[] = [{
