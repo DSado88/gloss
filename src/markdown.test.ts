@@ -622,4 +622,29 @@ describe("renderMarkdownInline", () => {
     expect(html).toContain("<pre>");
     expect(html).toContain("<h4>Section Title</h4>");
   });
+
+  // --- HTML in inline code (escape interaction) ---
+
+  it("renders HTML tags in inline code as escaped text, not live HTML", () => {
+    // User writes: use `<script>alert(1)</script>` to test
+    // The escape() runs first: <script> → &lt;script&gt;
+    // Then inline code extraction wraps it in <code>
+    const html = renderMarkdownInline("use `<script>alert(1)</script>` to test");
+    // Must contain escaped HTML inside <code>, not live <script>
+    expect(html).toContain("<code>");
+    expect(html).not.toMatch(/<script[\s>]/i);
+    // The escaped entities should be inside the code element
+    expect(html).toContain("&lt;script&gt;");
+  });
+
+  it("handles multiple inline code spans with special chars", () => {
+    const html = renderMarkdownInline("Compare `<div>` and `<span>` elements");
+    // Both should be in separate <code> elements
+    const codeCount = (html.match(/<code>/g) || []).length;
+    expect(codeCount).toBe(2);
+    expect(html).toContain("&lt;div&gt;");
+    expect(html).toContain("&lt;span&gt;");
+    expect(html).not.toMatch(/<div>/);
+    expect(html).not.toMatch(/<span>/);
+  });
 });
