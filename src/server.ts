@@ -62,7 +62,7 @@ function buildConvoDataEntry(turn: Turn) {
 // Per-session file watching + incremental parse
 // ---------------------------------------------------------------------------
 
-function getOrCreateSession(sessionId: string, jsonlPath: string): SessionState {
+export function getOrCreateSession(sessionId: string, jsonlPath: string): SessionState {
   let state = sessions.get(sessionId);
   if (state) return state;
 
@@ -202,6 +202,30 @@ function stopWatcher(state: SessionState) {
     clearInterval(state.pollTimer);
     state.pollTimer = null;
   }
+}
+
+/**
+ * Drop a client from a session. When the last client disconnects, stop the
+ * watcher and evict the SessionState so its fully-parsed conversation is freed
+ * — otherwise every session ever viewed accumulates in memory for the life of
+ * the process (unbounded heap growth → GC pressure).
+ */
+export function releaseClient(
+  sessionId: string,
+  ws: ServerWebSocket<{ sessionId: string }>,
+): void {
+  const state = sessions.get(sessionId);
+  if (!state) return;
+  state.clients.delete(ws);
+  if (state.clients.size === 0) {
+    stopWatcher(state);
+    sessions.delete(sessionId);
+  }
+}
+
+/** Test/diagnostics hook: number of live in-memory session states. */
+export function __sessionCount(): number {
+  return sessions.size;
 }
 
 // ---------------------------------------------------------------------------
@@ -691,14 +715,7 @@ export async function startServer(options: { port?: number } = {}): Promise<void
         startWatcher(state, includeThinking, includeTools);
       },
       close(ws) {
-        const sessionId = ws.data.sessionId;
-        const state = sessions.get(sessionId);
-        if (!state) return;
-        state.clients.delete(ws);
-        // Stop watcher when last client disconnects
-        if (state.clients.size === 0) {
-          stopWatcher(state);
-        }
+        releaseClient(ws.data.sessionId, ws);
       },
       message(_ws, _message) {
         // No client-to-server messages needed yet
