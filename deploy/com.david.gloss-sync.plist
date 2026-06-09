@@ -17,7 +17,7 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
-    <string>/Users/david/Documents/Programs/convo-viewer/scripts/sync-to-studio.sh</string>
+    <string>/Users/david/.local/bin/gloss-sync-to-studio.sh</string>
   </array>
 
   <key>StartInterval</key>

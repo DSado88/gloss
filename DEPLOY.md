@@ -63,10 +63,21 @@ Restart after pulling new code: `launchctl kickstart -k gui/501/com.david.gloss`
 ## 3. Laptop sync (LaunchAgent, every 5 min)
 
 ```sh
-# On the laptop
+# On the laptop — script must live OUTSIDE ~/Documents (see TCC note below)
+mkdir -p ~/.local/bin
+cp ~/Documents/Programs/convo-viewer/scripts/sync-to-studio.sh ~/.local/bin/gloss-sync-to-studio.sh
+chmod +x ~/.local/bin/gloss-sync-to-studio.sh
 cp ~/Documents/Programs/convo-viewer/deploy/com.david.gloss-sync.plist ~/Library/LaunchAgents/
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.david.gloss-sync.plist
 ```
+
+**macOS TCC gotcha (bit us twice):** launchd agents do not inherit the Full
+Disk Access that SSH/Terminal sessions have, so anything they execute or read
+under `~/Documents` fails — bun dies with `error: An unknown error occurred
+(Unexpected)`. That's why the Studio repo lives at `~/gloss` and the laptop
+sync script at `~/.local/bin`. Also: bun's runtime transpiler cache
+(`~/Library/Caches/bun`) was wedged on the Studio and hung every module load;
+the server plist sets `BUN_RUNTIME_TRANSPILER_CACHE_PATH=0`.
 
 The script takes a lock, so a slow first sync and the 5-min interval can't
 race. The server rescans on its own (60s–5min adaptive backoff), so new files
