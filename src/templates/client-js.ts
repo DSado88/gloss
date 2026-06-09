@@ -1139,8 +1139,21 @@ function connectWebSocket() {
     }
   }
 
+  // The baked wsUrl points at localhost; when the page is viewed remotely
+  // (e.g. phone -> Studio over the tailnet), rebuild it from location.host
+  // so live updates work from any client. Cookies ride along automatically.
+  function resolveWsUrl() {
+    try {
+      var u = new URL(WS_URL);
+      var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      return proto + '//' + location.host + u.pathname;
+    } catch (e) {
+      return WS_URL;
+    }
+  }
+
   function connect() {
-    ws = new WebSocket(WS_URL);
+    ws = new WebSocket(resolveWsUrl());
     ws.onopen = function() {
       reconnectDelay = 500;
       document.body.classList.remove('ws-disconnected');

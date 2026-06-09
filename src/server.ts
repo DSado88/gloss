@@ -14,6 +14,7 @@ import { buildServerIndex, deriveProjectNames } from "./index-page.js";
 import { buildToolViewerPage, buildMemoryPage } from "./tool-viewer.js";
 import { EmbeddingEngine, VectorIndex } from "./embeddings.js";
 import { backfillEmbeddings } from "./indexer.js";
+import { resolveRemoteConfig, guardRequest, authedViaQuery, buildAuthCookie, type RemoteConfig } from "./remote-guard.js";
 import type { Turn, TextBlock, TocEntry } from "./types.js";
 import type { ServerWebSocket } from "bun";
 
@@ -282,6 +283,8 @@ function getIndexHtml(db: ConvoDb): string {
 
 export async function startServer(options: { port?: number } = {}): Promise<void> {
   const port = options.port ?? 3456;
+  // Fail fast on misconfiguration (e.g. GLOSS_REMOTE=1 without a token)
+  const remoteCfg = resolveRemoteConfig(process.env);
   const db = openDb();
 
   // Discovery: scan and sync
@@ -382,22 +385,127 @@ export async function startServer(options: { port?: number } = {}): Promise<void
   const includeThinking = true;
   const includeTools = true;
 
+  const handler = createRequestHandler({
+    db,
+    port,
+    remoteCfg,
+    search: { embeddingEngine, vectorIndex },
+    includeThinking,
+    includeTools,
+  });
+
   const server = Bun.serve<{ sessionId: string }>({
     port,
+    hostname: remoteCfg.bindHost,
     idleTimeout: 120, // seconds — ask endpoint shells out to claude
-    async fetch(req, server) {
-      const url = new URL(req.url);
-      const pathname = url.pathname;
+    fetch: handler,
 
-      // WebSocket upgrade: /ws/:sessionId
-      if (pathname.startsWith("/ws/")) {
-        const sessionId = pathname.slice(4);
-        const upgraded = server.upgrade(req, { data: { sessionId } });
-        if (!upgraded) {
-          return new Response("WebSocket upgrade failed", { status: 400 });
-        }
-        return undefined;
+    websocket: {
+      open(ws) {
+        const sessionId = ws.data.sessionId;
+        const session = db.getSession(sessionId);
+        if (!session?.jsonl_path) return;
+
+        const state = getOrCreateSession(sessionId, session.jsonl_path);
+        state.clients.add(ws);
+        // Lazy: start watcher when first client connects
+        startWatcher(state, includeThinking, includeTools);
+      },
+      close(ws) {
+        releaseClient(ws.data.sessionId, ws);
+      },
+      message(_ws, _message) {
+        // No client-to-server messages needed yet
+      },
+    },
+  });
+
+  const displayHost = !remoteCfg.bindHost || remoteCfg.bindHost === "0.0.0.0"
+    ? "localhost"
+    : remoteCfg.bindHost;
+  const serverUrl = `http://${displayHost}:${port}`;
+  console.log(`Convo Viewer at ${serverUrl}${remoteCfg.remote ? " (remote-safe mode)" : ""}`);
+
+  // Open browser on macOS — local mode only (a headless service has no GUI session)
+  if (process.platform === "darwin" && !remoteCfg.remote) {
+    Bun.spawn(["open", serverUrl], { stdio: ["ignore", "ignore", "ignore"] });
+  }
+
+  // Cleanup on shutdown
+  process.on("SIGINT", () => {
+    for (const state of sessions.values()) stopWatcher(state);
+    embeddingEngine?.dispose();
+    db.close();
+    server.stop();
+    process.exit(0);
+  });
+  process.on("SIGTERM", () => {
+    for (const state of sessions.values()) stopWatcher(state);
+    embeddingEngine?.dispose();
+    db.close();
+    server.stop();
+    process.exit(0);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Request handler factory — the real routing logic, exported so tests can
+// exercise auth + routes against a temp DB without startServer's side effects
+// ---------------------------------------------------------------------------
+
+export interface RequestHandlerDeps {
+  db: ConvoDb;
+  port: number;
+  remoteCfg?: RemoteConfig;
+  search?: { embeddingEngine?: EmbeddingEngine; vectorIndex?: VectorIndex | null };
+  includeThinking?: boolean;
+  includeTools?: boolean;
+}
+
+interface UpgradeServer {
+  upgrade(req: Request, opts: { data: { sessionId: string } }): boolean;
+}
+
+export function createRequestHandler(deps: RequestHandlerDeps) {
+  const { db, port } = deps;
+  const remoteCfg = deps.remoteCfg ?? resolveRemoteConfig();
+  const search = deps.search ?? {};
+  const includeThinking = deps.includeThinking ?? true;
+  const includeTools = deps.includeTools ?? true;
+
+  return async function handleRequest(req: Request, server: UpgradeServer): Promise<Response | undefined> {
+    const url = new URL(req.url);
+    const pathname = url.pathname;
+
+    const denied = guardRequest(req, pathname, remoteCfg);
+    if (denied) return denied;
+
+    // WebSocket upgrade: /ws/:sessionId
+    if (pathname.startsWith("/ws/")) {
+      const sessionId = pathname.slice(4);
+      const upgraded = server.upgrade(req, { data: { sessionId } });
+      if (!upgraded) {
+        return new Response("WebSocket upgrade failed", { status: 400 });
       }
+      return undefined;
+    }
+
+    const res = await route(req, url, pathname);
+    // Authenticated via a one-time ?token= link — set the session cookie so
+    // subsequent requests (and the WebSocket upgrade) authenticate automatically.
+    if (authedViaQuery(req, remoteCfg)) {
+      try {
+        res.headers.append("Set-Cookie", buildAuthCookie(remoteCfg));
+      } catch {
+        const headers = new Headers(res.headers);
+        headers.append("Set-Cookie", buildAuthCookie(remoteCfg));
+        return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+      }
+    }
+    return res;
+  };
+
+  async function route(req: Request, url: URL, pathname: string): Promise<Response> {
 
       // Static assets
       if (pathname === "/assets/style.css") {
@@ -658,7 +766,7 @@ export async function startServer(options: { port?: number } = {}): Promise<void
 
       // API routes
       if (pathname.startsWith("/api/")) {
-        return handleApiRoute(req, pathname, db, { embeddingEngine, vectorIndex });
+        return handleApiRoute(req, pathname, db, search);
       }
 
       // Conversation page: /c/:sessionId
@@ -701,51 +809,7 @@ export async function startServer(options: { port?: number } = {}): Promise<void
       }
 
       return new Response("Not Found", { status: 404 });
-    },
-
-    websocket: {
-      open(ws) {
-        const sessionId = ws.data.sessionId;
-        const session = db.getSession(sessionId);
-        if (!session?.jsonl_path) return;
-
-        const state = getOrCreateSession(sessionId, session.jsonl_path);
-        state.clients.add(ws);
-        // Lazy: start watcher when first client connects
-        startWatcher(state, includeThinking, includeTools);
-      },
-      close(ws) {
-        releaseClient(ws.data.sessionId, ws);
-      },
-      message(_ws, _message) {
-        // No client-to-server messages needed yet
-      },
-    },
-  });
-
-  const serverUrl = `http://localhost:${port}`;
-  console.log(`Convo Viewer at ${serverUrl}`);
-
-  // Open browser on macOS
-  if (process.platform === "darwin") {
-    Bun.spawn(["open", serverUrl], { stdio: ["ignore", "ignore", "ignore"] });
   }
-
-  // Cleanup on shutdown
-  process.on("SIGINT", () => {
-    for (const state of sessions.values()) stopWatcher(state);
-    embeddingEngine?.dispose();
-    db.close();
-    server.stop();
-    process.exit(0);
-  });
-  process.on("SIGTERM", () => {
-    for (const state of sessions.values()) stopWatcher(state);
-    embeddingEngine?.dispose();
-    db.close();
-    server.stop();
-    process.exit(0);
-  });
 }
 
 // ---------------------------------------------------------------------------
