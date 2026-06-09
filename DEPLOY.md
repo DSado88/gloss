@@ -22,7 +22,7 @@ ssh david@100.109.110.36 'mkdir -p ~/Documents/Programs'
 rsync -a ~/Documents/Programs/convo-viewer/ \
   david@100.109.110.36:/Users/david/Documents/Programs/convo-viewer/ \
   --exclude node_modules
-ssh david@100.109.110.36 'cd ~/Documents/Programs/convo-viewer && ~/.bun/bin/bun install'
+ssh david@100.109.110.36 'cd ~/gloss && ~/.bun/bin/bun install'
 
 # Conversation logs (~28G — first run takes a while)
 ~/Documents/Programs/convo-viewer/scripts/sync-to-studio.sh
@@ -51,7 +51,7 @@ Note: the seeded DB's `jsonl_paths` are all `/Users/david/.claude/projects/...`
 # On the Studio
 TOKEN=$(openssl rand -hex 32); echo "GLOSS_AUTH_TOKEN=$TOKEN"   # save this in a password manager
 sed "s/__GLOSS_AUTH_TOKEN__/$TOKEN/" \
-  ~/Documents/Programs/convo-viewer/deploy/com.david.gloss.plist \
+  ~/gloss/deploy/com.david.gloss.plist \
   > ~/Library/LaunchAgents/com.david.gloss.plist
 chmod 600 ~/Library/LaunchAgents/com.david.gloss.plist
 launchctl bootstrap gui/501 ~/Library/LaunchAgents/com.david.gloss.plist

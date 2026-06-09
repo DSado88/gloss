@@ -18,14 +18,14 @@
   <key>ProgramArguments</key>
   <array>
     <string>/Users/david/.bun/bin/bun</string>
-    <string>/Users/david/Documents/Programs/convo-viewer/src/cli.ts</string>
+    <string>/Users/david/gloss/src/cli.ts</string>
     <string>serve</string>
     <string>--port</string>
     <string>3456</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/Users/david/Documents/Programs/convo-viewer</string>
+  <string>/Users/david/gloss</string>
 
   <key>EnvironmentVariables</key>
   <dict>
@@ -39,6 +39,10 @@
     <string>1</string>
     <key>HOME</key>
     <string>/Users/david</string>
+    <!-- bun's transpiler cache (~/Library/Caches/bun) has hung module loads
+         on this machine; the cache only speeds up cold starts, so disable -->
+    <key>BUN_RUNTIME_TRANSPILER_CACHE_PATH</key>
+    <string>0</string>
     <key>PATH</key>
     <string>/Users/david/.bun/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
   </dict>
