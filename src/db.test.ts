@@ -1543,3 +1543,55 @@ describe("annotation safety", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// SQLite safety: busy_timeout + safe online backup
+// ---------------------------------------------------------------------------
+
+describe("sqlite safety", () => {
+  let tempDir: string;
+  let db: ConvoDb;
+
+  beforeEach(() => {
+    tempDir = makeTempDir();
+    db = openDb(path.join(tempDir, "test.sqlite"));
+  });
+
+  afterEach(() => {
+    db.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("openDb sets a busy_timeout so concurrent access waits instead of failing", () => {
+    const row = db.db.query("PRAGMA busy_timeout").get() as { timeout: number };
+    expect(row.timeout).toBeGreaterThanOrEqual(5000);
+  });
+
+  it("backupTo produces a restorable snapshot via VACUUM INTO", () => {
+    db.upsertSession({ id: "bk-sess", title: "backup me" });
+    db.upsertAnnotation({
+      id: "bk-ann",
+      session_id: "bk-sess",
+      turn_index: 0,
+      char_start: 0,
+      char_end: 5,
+      text: "saved",
+    });
+
+    const backupPath = path.join(tempDir, "snapshot.sqlite");
+    db.backupTo(backupPath);
+
+    expect(fs.existsSync(backupPath)).toBe(true);
+    const restored = openDb(backupPath);
+    expect(restored.getSession("bk-sess")?.title).toBe("backup me");
+    expect(restored.getAnnotation("bk-ann")?.text).toBe("saved");
+    restored.close();
+  });
+
+  it("backupTo refuses to overwrite an existing file", () => {
+    const backupPath = path.join(tempDir, "exists.sqlite");
+    fs.writeFileSync(backupPath, "do not clobber");
+    expect(() => db.backupTo(backupPath)).toThrow();
+    expect(fs.readFileSync(backupPath, "utf-8")).toBe("do not clobber");
+  });
+});

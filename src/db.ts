@@ -943,6 +943,22 @@ export class ConvoDb {
 
   // ---- Lifecycle ----------------------------------------------------------
 
+  /**
+   * Snapshot the live database to a new file using VACUUM INTO — safe while
+   * the server is writing (unlike a raw file copy, which can tear WAL state).
+   */
+  backupTo(destPath: string): void {
+    if (fs.existsSync(destPath)) {
+      throw new Error(`Backup destination already exists: ${destPath}`);
+    }
+    const dir = path.dirname(destPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    // Parameter binding is not allowed for VACUUM INTO; escape single quotes
+    this.db.exec(`VACUUM INTO '${destPath.replace(/'/g, "''")}'`);
+  }
+
   close(): void {
     this.db.close();
   }
@@ -977,9 +993,11 @@ export function openDb(dbPath?: string): ConvoDb {
 
   const db = new Database(resolvedPath);
 
-  // Enable WAL mode and foreign keys
+  // Enable WAL mode and foreign keys; wait on locks instead of failing
+  // immediately (long-running server + CLI tools share this file)
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
+  db.exec("PRAGMA busy_timeout = 5000");
 
   // Run schema migration
   db.exec(SCHEMA_SQL);

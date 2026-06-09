@@ -189,12 +189,30 @@ if (full) {
       }
     }
   }
-  // Gloss DB + embeddings
+  // Gloss DB + embeddings. The SQLite DB may be live (WAL mode) — raw copies
+  // of db.sqlite/-wal/-shm can tear; snapshot via VACUUM INTO instead.
   const convoDir = path.join(home, ".convo");
   if (fs.existsSync(convoDir)) {
     const convoFiles = fs.readdirSync(convoDir);
     for (const f of convoFiles) {
+      if (f === "db.sqlite" || f === "db.sqlite-wal" || f === "db.sqlite-shm") continue;
       copyFile(path.join(convoDir, f), path.join(destDir, "gloss", f));
+    }
+    const dbFile = path.join(convoDir, "db.sqlite");
+    if (fs.existsSync(dbFile)) {
+      try {
+        const { openDb } = await import("../src/db.js");
+        const db = openDb(dbFile);
+        const snapshotPath = path.join(destDir, "gloss", "db.sqlite");
+        db.backupTo(snapshotPath);
+        db.close();
+        const snapStat = fs.statSync(snapshotPath);
+        fileCount++;
+        totalBytes += snapStat.size;
+        console.log("  Gloss DB snapshotted via VACUUM INTO");
+      } catch (e) {
+        console.error(`  Gloss DB snapshot failed: ${e}`);
+      }
     }
   }
 } else {
