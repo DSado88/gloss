@@ -1411,3 +1411,135 @@ describe("index freshness (mtimeMs + size)", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Annotation safety: anchor context persistence, journal, global export
+// ---------------------------------------------------------------------------
+
+describe("annotation safety", () => {
+  let tempDir: string;
+  let db: ConvoDb;
+
+  beforeEach(() => {
+    tempDir = makeTempDir();
+    db = openDb(path.join(tempDir, "test.sqlite"));
+    db.upsertSession({ id: "as-sess" });
+  });
+
+  afterEach(() => {
+    db.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function makeAnn(id: string, extra?: Partial<AnnotationRecord>): AnnotationRecord {
+    return {
+      id,
+      session_id: "as-sess",
+      turn_index: 1,
+      block_index: 0,
+      char_start: 5,
+      char_end: 15,
+      text: "highlighted",
+      comment: "note",
+      kind: "highlight",
+      ...extra,
+    };
+  }
+
+  describe("anchor context (prefix/suffix/trigger)", () => {
+    it("persists prefix, suffix, and trigger through upsert + get", () => {
+      db.upsertAnnotation(makeAnn("a1", {
+        prefix: "text before the ",
+        suffix: " and after it",
+        trigger: 'User: "what about this?"',
+      }));
+      const ann = db.getAnnotation("a1")!;
+      expect(ann.prefix).toBe("text before the ");
+      expect(ann.suffix).toBe(" and after it");
+      expect(ann.trigger).toBe('User: "what about this?"');
+    });
+
+    it("includes anchor context in exportSessionAnnotations", () => {
+      db.upsertAnnotation(makeAnn("a2", { prefix: "pre", suffix: "post", trigger: "trig" }));
+      const exported = db.exportSessionAnnotations("as-sess");
+      expect(exported[0].prefix).toBe("pre");
+      expect(exported[0].suffix).toBe("post");
+      expect(exported[0].trigger).toBe("trig");
+    });
+
+    it("round-trips anchor context through export + import", () => {
+      db.upsertAnnotation(makeAnn("a3", { prefix: "pre", suffix: "post", trigger: "trig" }));
+      const exported = db.exportSessionAnnotations("as-sess");
+      db.deleteAnnotation("a3");
+
+      db.upsertSession({ id: "as-sess-2" });
+      db.importAnnotationsJson("as-sess-2", exported);
+      const ann = db.getAnnotation("a3")!;
+      expect(ann.prefix).toBe("pre");
+      expect(ann.suffix).toBe("post");
+      expect(ann.trigger).toBe("trig");
+    });
+  });
+
+  describe("write journal", () => {
+    function readJournal(): Array<Record<string, unknown>> {
+      const backupsDir = path.join(tempDir, "backups");
+      if (!fs.existsSync(backupsDir)) return [];
+      const files = fs.readdirSync(backupsDir).filter((f) => /^annotations-\d{4}-\d{2}-\d{2}\.jsonl$/.test(f));
+      const lines: Array<Record<string, unknown>> = [];
+      for (const f of files) {
+        for (const line of fs.readFileSync(path.join(backupsDir, f), "utf-8").split("\n")) {
+          if (line.trim()) lines.push(JSON.parse(line));
+        }
+      }
+      return lines;
+    }
+
+    it("journals annotation upserts", () => {
+      db.upsertAnnotation(makeAnn("j1"));
+      const events = readJournal();
+      const upserts = events.filter((e) => e.op === "upsert");
+      expect(upserts.length).toBeGreaterThanOrEqual(1);
+      const ann = upserts[upserts.length - 1].annotation as Record<string, unknown>;
+      expect(ann.id).toBe("j1");
+      expect(ann.session_id).toBe("as-sess");
+      expect(ann.text).toBe("highlighted");
+    });
+
+    it("journals annotation deletes with session id", () => {
+      db.upsertAnnotation(makeAnn("j2"));
+      db.deleteAnnotation("j2");
+      const events = readJournal();
+      const deletes = events.filter((e) => e.op === "delete");
+      expect(deletes.length).toBe(1);
+      expect(deletes[0].id).toBe("j2");
+      expect(deletes[0].session_id).toBe("as-sess");
+    });
+
+    it("journal events carry timestamps", () => {
+      db.upsertAnnotation(makeAnn("j3"));
+      const events = readJournal();
+      expect(typeof events[0].ts).toBe("string");
+      expect(new Date(events[0].ts as string).getTime()).toBeGreaterThan(0);
+    });
+  });
+
+  describe("exportAllAnnotations", () => {
+    it("exports annotations across all sessions with session ids", () => {
+      db.upsertSession({ id: "as-other" });
+      db.upsertAnnotation(makeAnn("g1"));
+      db.upsertAnnotation(makeAnn("g2", { session_id: "as-other" }));
+      db.replaceAnnotationTags("g1", ["tagged"]);
+
+      const all = db.exportAllAnnotations();
+      expect(all).toHaveLength(2);
+      const ids = all.map((a) => a.id).sort();
+      expect(ids).toEqual(["g1", "g2"]);
+      const g1 = all.find((a) => a.id === "g1")!;
+      expect(g1.session_id).toBe("as-sess");
+      expect(g1.tags).toEqual(["tagged"]);
+      const g2 = all.find((a) => a.id === "g2")!;
+      expect(g2.session_id).toBe("as-other");
+    });
+  });
+});

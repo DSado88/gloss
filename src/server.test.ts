@@ -858,3 +858,77 @@ describe("server routes", () => {
     expect(Array.isArray(data)).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Annotation anchor context (prefix/suffix/trigger) through the API
+// ---------------------------------------------------------------------------
+
+describe("annotation anchor context via API", () => {
+  let dbDir: string;
+  let db: ConvoDb;
+
+  beforeAll(() => {
+    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), "convo-anchor-db-"));
+    db = openDb(path.join(dbDir, "test.sqlite"));
+    db.upsertSession({ id: "anchor-sess" });
+  });
+
+  afterAll(() => {
+    db.close();
+    fs.rmSync(dbDir, { recursive: true, force: true });
+  });
+
+  it("persists prefix/suffix/trigger through POST and returns them on GET", async () => {
+    const post = new Request("http://localhost/api/sessions/anchor-sess/annotations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: "anchor-ann-1",
+        turnIndex: 3,
+        blockIndex: 0,
+        charStart: 10,
+        charEnd: 25,
+        text: "anchored text",
+        comment: "",
+        kind: "insight",
+        prefix: "context before ",
+        suffix: " context after",
+        trigger: 'User: "explain this"',
+      }),
+    });
+    const postRes = await handleApiRoute(post, "/api/sessions/anchor-sess/annotations", db);
+    expect(postRes.status).toBe(200);
+
+    const get = new Request("http://localhost/api/sessions/anchor-sess/annotations");
+    const getRes = await handleApiRoute(get, "/api/sessions/anchor-sess/annotations", db);
+    const anns = (await getRes.json()) as Array<Record<string, unknown>>;
+    const ann = anns.find((a) => a.id === "anchor-ann-1")!;
+    expect(ann.prefix).toBe("context before ");
+    expect(ann.suffix).toBe(" context after");
+    expect(ann.trigger).toBe('User: "explain this"');
+  });
+
+  it("persists anchor context through PUT updates", async () => {
+    const put = new Request("http://localhost/api/sessions/anchor-sess/annotations/anchor-ann-1", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        turnIndex: 3,
+        blockIndex: 0,
+        charStart: 10,
+        charEnd: 25,
+        text: "anchored text",
+        prefix: "updated prefix ",
+        suffix: " updated suffix",
+        trigger: "updated trigger",
+      }),
+    });
+    const putRes = await handleApiRoute(put, "/api/sessions/anchor-sess/annotations/anchor-ann-1", db);
+    expect(putRes.status).toBe(200);
+
+    const ann = db.getAnnotation("anchor-ann-1")!;
+    expect(ann.prefix).toBe("updated prefix ");
+    expect(ann.suffix).toBe(" updated suffix");
+    expect(ann.trigger).toBe("updated trigger");
+  });
+});

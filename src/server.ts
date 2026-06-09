@@ -1033,6 +1033,9 @@ async function handleApiRouteInner(
       comment: (body.comment as string) ?? "",
       kind: (body.kind as string) ?? "highlight",
       speaker: (body.speaker as string) ?? null,
+      prefix: (body.prefix as string) ?? "",
+      suffix: (body.suffix as string) ?? "",
+      trigger: (body.trigger as string) ?? "",
     });
     // Replace tags atomically — filter to non-empty strings to prevent NOT NULL crash
     if (Array.isArray(body.tags)) {
@@ -1069,6 +1072,9 @@ async function handleApiRouteInner(
       comment: (body.comment as string) ?? "",
       kind: (body.kind as string) ?? "highlight",
       speaker: (body.speaker as string) ?? null,
+      prefix: (body.prefix as string) ?? "",
+      suffix: (body.suffix as string) ?? "",
+      trigger: (body.trigger as string) ?? "",
     });
     if (Array.isArray(body.tags)) {
       const safeTags = (body.tags as unknown[]).filter((t): t is string => typeof t === "string" && t.length > 0);

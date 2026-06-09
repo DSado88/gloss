@@ -173,3 +173,117 @@ describe("CLI commands", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// annotations export / import (global backup)
+// ---------------------------------------------------------------------------
+
+describe("annotations export/import CLI", () => {
+  let dbDir: string;
+  let dbPath: string;
+
+  beforeEach(() => {
+    dbDir = fs.mkdtempSync(path.join(os.tmpdir(), "convo-annexp-test-"));
+    dbPath = path.join(dbDir, "test.sqlite");
+
+    const db = openDb(dbPath);
+    db.upsertSession({ id: "sess-a" });
+    db.upsertSession({ id: "sess-b" });
+    db.upsertAnnotation({
+      id: "exp-1",
+      session_id: "sess-a",
+      turn_index: 2,
+      block_index: 1,
+      char_start: 5,
+      char_end: 20,
+      text: "first highlight",
+      comment: "with comment",
+      kind: "decision",
+      speaker: "assistant",
+      prefix: "before ",
+      suffix: " after",
+      trigger: 'User: "why?"',
+    });
+    db.upsertAnnotation({
+      id: "exp-2",
+      session_id: "sess-b",
+      turn_index: 0,
+      block_index: 0,
+      char_start: 0,
+      char_end: 4,
+      text: "more",
+      kind: "highlight",
+    });
+    db.replaceAnnotationTags("exp-1", ["arch", "studio"]);
+    db.close();
+  });
+
+  afterEach(() => {
+    fs.rmSync(dbDir, { recursive: true, force: true });
+  });
+
+  async function runCli(args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    const proc = Bun.spawn(["bun", path.join(import.meta.dir, "cli.ts"), ...args], {
+      env: { ...process.env, CONVO_DB_PATH: dbPath },
+      stdout: "pipe",
+      stderr: "pipe",
+      cwd: dbDir,
+    });
+    const stdout = await new Response(proc.stdout).text();
+    const stderr = await new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
+    return { stdout, stderr, exitCode };
+  }
+
+  it("exports all annotations across sessions to a JSON file", async () => {
+    const outFile = path.join(dbDir, "backup.json");
+    const result = await runCli(["annotations", "export", "-o", outFile]);
+    expect(result.exitCode).toBe(0);
+
+    const payload = JSON.parse(fs.readFileSync(outFile, "utf-8"));
+    expect(payload.count).toBe(2);
+    expect(payload.annotations).toHaveLength(2);
+    const exp1 = payload.annotations.find((a: any) => a.id === "exp-1");
+    expect(exp1.session_id).toBe("sess-a");
+    expect(exp1.prefix).toBe("before ");
+    expect(exp1.suffix).toBe(" after");
+    expect(exp1.trigger).toBe('User: "why?"');
+    expect(exp1.tags.sort()).toEqual(["arch", "studio"]);
+  });
+
+  it("round-trips: export, wipe, import restores everything", async () => {
+    const outFile = path.join(dbDir, "backup.json");
+    await runCli(["annotations", "export", "-o", outFile]);
+
+    // Wipe annotations
+    const db = openDb(dbPath);
+    db.deleteAnnotation("exp-1");
+    db.deleteAnnotation("exp-2");
+    db.close();
+
+    const result = await runCli(["annotations", "import", outFile]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("2 imported");
+
+    const db2 = openDb(dbPath);
+    const ann = db2.getAnnotation("exp-1")!;
+    expect(ann.text).toBe("first highlight");
+    expect(ann.prefix).toBe("before ");
+    expect(ann.suffix).toBe(" after");
+    expect(ann.trigger).toBe('User: "why?"');
+    expect(ann.kind).toBe("decision");
+    expect(ann.tags.sort()).toEqual(["arch", "studio"]);
+    expect(db2.getAnnotation("exp-2")).not.toBeNull();
+    db2.close();
+  });
+
+  it("import is idempotent — re-running skips existing annotations", async () => {
+    const outFile = path.join(dbDir, "backup.json");
+    await runCli(["annotations", "export", "-o", outFile]);
+
+    const result = await runCli(["annotations", "import", outFile]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("0 imported");
+    expect(result.stdout).toContain("2 skipped");
+  });
+});

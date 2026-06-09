@@ -112,6 +112,98 @@ program
     db.close();
   });
 
+// ── Annotations backup subcommands ──
+const annotationsCmd = program
+  .command("annotations")
+  .description("Bulk annotation backup and restore");
+
+annotationsCmd
+  .command("export")
+  .description("Export every annotation (all sessions) to a JSON file")
+  .option("-o, --output <file>", "Output file (default: annotations-backup.json)")
+  .action(async (options) => {
+    const { openDb } = await import("./db.js");
+    const fs = await import("node:fs");
+    const db = openDb();
+
+    const all = db.exportAllAnnotations();
+    const payload = {
+      version: 1,
+      exported_at: new Date().toISOString(),
+      count: all.length,
+      annotations: all,
+    };
+    const outFile = options.output ?? "annotations-backup.json";
+    fs.writeFileSync(outFile, JSON.stringify(payload, null, 2));
+    console.log(`${all.length} annotation(s) exported to ${outFile}`);
+    db.close();
+  });
+
+annotationsCmd
+  .command("import")
+  .description("Import an annotations backup JSON (idempotent — existing ids are skipped)")
+  .argument("<file>", "Backup file produced by `annotations export`")
+  .action(async (file: string) => {
+    const { openDb } = await import("./db.js");
+    const fs = await import("node:fs");
+    const db = openDb();
+
+    let raw;
+    try {
+      raw = JSON.parse(fs.readFileSync(file, "utf-8"));
+    } catch (e) {
+      console.error(`Could not read ${file}: ${e}`);
+      db.close();
+      process.exit(1);
+    }
+
+    const annotations = Array.isArray(raw) ? raw : raw.annotations;
+    if (!Array.isArray(annotations)) {
+      console.error("Invalid backup file: expected { annotations: [...] } or a JSON array");
+      db.close();
+      process.exit(1);
+    }
+
+    // Group by session, ensure sessions exist, and import per session
+    const bySession = new Map<string, any[]>();
+    for (const ann of annotations) {
+      const sid = ann.session_id;
+      if (!sid || !ann.id) continue;
+      if (!bySession.has(sid)) bySession.set(sid, []);
+      // exportAllAnnotations uses DB column names; importAnnotationsJson expects sidecar names
+      bySession.get(sid)!.push({
+        id: ann.id,
+        turnIndex: ann.turnIndex ?? ann.turn_index,
+        blockIndex: ann.blockIndex ?? ann.block_index ?? 0,
+        charStart: ann.charStart ?? ann.char_start,
+        charEnd: ann.charEnd ?? ann.char_end,
+        text: ann.text,
+        comment: ann.comment ?? "",
+        kind: ann.kind ?? "highlight",
+        speaker: ann.speaker ?? undefined,
+        prefix: ann.prefix ?? "",
+        suffix: ann.suffix ?? "",
+        trigger: ann.trigger ?? "",
+        tags: ann.tags,
+        created: ann.created_at != null ? ann.created_at * 1000 : ann.created,
+      });
+    }
+
+    let imported = 0;
+    let skipped = 0;
+    for (const [sessionId, anns] of bySession) {
+      if (!db.getSession(sessionId)) {
+        db.upsertSession({ id: sessionId });
+      }
+      const result = db.importAnnotationsJson(sessionId, anns);
+      imported += result.imported;
+      skipped += result.skipped;
+    }
+
+    console.log(`${imported} imported, ${skipped} skipped (already present)`);
+    db.close();
+  });
+
 // ── Highlights subcommand ──
 program
   .command("highlights")

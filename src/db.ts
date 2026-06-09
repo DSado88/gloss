@@ -36,6 +36,11 @@ export interface AnnotationRecord {
   comment?: string;
   kind?: string;
   speaker?: string | null;
+  /** Re-anchor context: text immediately before/after the highlight. */
+  prefix?: string;
+  suffix?: string;
+  /** The prompt that triggered the highlighted response. */
+  trigger?: string;
   created_at?: number;
   updated_at?: number;
 }
@@ -68,6 +73,9 @@ export interface SidecarAnnotation {
   kind?: string;
   speaker?: string;
   role?: string;
+  prefix?: string;
+  suffix?: string;
+  trigger?: string;
   tags?: string[];
   timestamp?: number;
   created?: number;
@@ -102,6 +110,9 @@ CREATE TABLE IF NOT EXISTS annotations (
   comment TEXT DEFAULT '',
   kind TEXT DEFAULT 'highlight',
   speaker TEXT,
+  prefix TEXT DEFAULT '',
+  suffix TEXT DEFAULT '',
+  "trigger" TEXT DEFAULT '',
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
@@ -208,9 +219,37 @@ function defaultDbPath(): string {
 
 export class ConvoDb {
   readonly db: Database;
+  /** On-disk DB path; undefined for in-memory/test handles without journaling. */
+  readonly dbPath?: string;
 
-  constructor(db: Database) {
+  constructor(db: Database, dbPath?: string) {
     this.db = db;
+    this.dbPath = dbPath;
+  }
+
+  /** Directory for annotation write journals (sibling of the DB file). */
+  private get backupsDir(): string | null {
+    if (!this.dbPath || this.dbPath === ":memory:") return null;
+    return path.join(path.dirname(this.dbPath), "backups");
+  }
+
+  /**
+   * Append an event to the daily annotation journal. Best-effort: a failed
+   * journal write must never fail the DB write it records.
+   */
+  private journalAnnotation(event: Record<string, unknown>): void {
+    const dir = this.backupsDir;
+    if (!dir) return;
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      const day = new Date().toISOString().slice(0, 10);
+      fs.appendFileSync(
+        path.join(dir, `annotations-${day}.jsonl`),
+        JSON.stringify({ ts: new Date().toISOString(), ...event }) + "\n",
+      );
+    } catch {
+      // best-effort
+    }
   }
 
   /** Run a function inside a BEGIN/COMMIT transaction. */
@@ -317,8 +356,8 @@ export class ConvoDb {
 
   upsertAnnotation(ann: AnnotationRecord): void {
     this.db.run(
-      `INSERT INTO annotations (id, session_id, turn_index, block_index, char_start, char_end, text, comment, kind, speaker, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, coalesce(?, unixepoch()), coalesce(?, unixepoch()))
+      `INSERT INTO annotations (id, session_id, turn_index, block_index, char_start, char_end, text, comment, kind, speaker, prefix, suffix, "trigger", created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, coalesce(?, unixepoch()), coalesce(?, unixepoch()))
        ON CONFLICT(id) DO UPDATE SET
          turn_index  = excluded.turn_index,
          block_index = excluded.block_index,
@@ -328,6 +367,9 @@ export class ConvoDb {
          comment     = excluded.comment,
          kind        = excluded.kind,
          speaker     = excluded.speaker,
+         prefix      = excluded.prefix,
+         suffix      = excluded.suffix,
+         "trigger"   = excluded."trigger",
          updated_at  = unixepoch()`,
       [
         ann.id,
@@ -340,14 +382,22 @@ export class ConvoDb {
         ann.comment ?? "",
         ann.kind ?? "highlight",
         ann.speaker ?? null,
+        ann.prefix ?? "",
+        ann.suffix ?? "",
+        ann.trigger ?? "",
         ann.created_at ?? null,
         ann.updated_at ?? null,
       ],
     );
+    this.journalAnnotation({ op: "upsert", annotation: ann });
   }
 
   deleteAnnotation(id: string): void {
+    const row = this.db.query("SELECT session_id FROM annotations WHERE id = ?").get(id) as { session_id: string } | null;
     this.db.run("DELETE FROM annotations WHERE id = ?", [id]);
+    if (row) {
+      this.journalAnnotation({ op: "delete", id, session_id: row.session_id });
+    }
   }
 
   getAnnotation(id: string): AnnotationWithTags | null {
@@ -541,11 +591,9 @@ export class ConvoDb {
 
   // ---- Client-ready annotation export ------------------------------------
 
-  getAnnotationForClient(id: string): (AnnotationWithTags & { prefix?: string; suffix?: string; trigger?: string; turnId?: string }) | null {
+  getAnnotationForClient(id: string): (AnnotationWithTags & { turnId?: string }) | null {
     const ann = this.getAnnotation(id);
     if (!ann) return null;
-    // The AnnotationRecord stores char offsets but not prefix/suffix/trigger/turnId.
-    // Those are client-side fields. Return what we have; the client fills in the rest.
     return { ...ann, turnId: `turn-${ann.turn_index}` };
   }
 
@@ -588,6 +636,9 @@ export class ConvoDb {
           comment: ann.comment ?? "",
           kind: ann.kind ?? "highlight",
           speaker: ann.speaker ?? ann.role ?? null,
+          prefix: ann.prefix ?? "",
+          suffix: ann.suffix ?? "",
+          trigger: ann.trigger ?? "",
           created_at: createdAt ?? undefined,
           updated_at: createdAt ?? undefined,
         });
@@ -621,9 +672,25 @@ export class ConvoDb {
       kind: a.kind ?? "highlight",
       speaker: a.speaker ?? undefined,
       role: a.speaker ?? undefined,
+      prefix: a.prefix ?? "",
+      suffix: a.suffix ?? "",
+      trigger: a.trigger ?? "",
       tags: a.tags.length ? a.tags : undefined,
       timestamp: a.created_at != null ? a.created_at * 1000 : undefined,
     }));
+  }
+
+  /** Export every annotation in the DB (all sessions), tags included. */
+  exportAllAnnotations(): AnnotationWithTags[] {
+    const rows = this.db
+      .query(
+        `SELECT a.*, s.title AS session_title, s.project AS session_project
+         FROM annotations a
+         LEFT JOIN sessions s ON s.id = a.session_id
+         ORDER BY a.session_id, a.turn_index, a.block_index, a.char_start`,
+      )
+      .all() as (AnnotationRecord & { session_title: string | null; session_project: string | null })[];
+    return rows.map((r) => ({ ...r, tags: this._getTagsForAnnotation(r.id) }));
   }
 
   // ---- Full-text search ---------------------------------------------------
@@ -930,6 +997,9 @@ export function openDb(dbPath?: string): ConvoDb {
   try { db.exec("ALTER TABLE sessions ADD COLUMN summary_source_mtime INTEGER"); } catch {}
   try { db.exec("ALTER TABLE sessions ADD COLUMN summary_status TEXT DEFAULT 'idle'"); } catch {}
   try { db.exec("ALTER TABLE sessions ADD COLUMN summary_error TEXT"); } catch {}
+  try { db.exec("ALTER TABLE annotations ADD COLUMN prefix TEXT DEFAULT ''"); } catch {}
+  try { db.exec("ALTER TABLE annotations ADD COLUMN suffix TEXT DEFAULT ''"); } catch {}
+  try { db.exec(`ALTER TABLE annotations ADD COLUMN "trigger" TEXT DEFAULT ''`); } catch {}
 
   // Migrate FTS to contentless_delete=1 if needed (fixes ghost entry bug)
   try {
@@ -941,5 +1011,5 @@ export function openDb(dbPath?: string): ConvoDb {
     }
   } catch {}
 
-  return new ConvoDb(db);
+  return new ConvoDb(db, resolvedPath);
 }
