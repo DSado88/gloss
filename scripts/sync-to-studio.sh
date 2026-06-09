@@ -23,6 +23,7 @@ DRY_RUN=()
 if [[ "${1:-}" == "--dry-run" ]]; then
   DRY_RUN=(--dry-run --verbose)
 fi
+# ${arr:+...} guard: empty-array expansion errors under `set -u` in bash <4.4
 
 # One sync at a time — overlapping runs (slow first sync + launchd interval)
 # would race each other on the same partial dirs.
@@ -39,7 +40,7 @@ rsync -a \
   --exclude='subagents/' \
   --exclude='.rsync-partial/' \
   --exclude='.DS_Store' \
-  "${DRY_RUN[@]}" \
+  ${DRY_RUN:+"${DRY_RUN[@]}"} \
   "$SRC" "$DEST"
 
 echo "[$LOG_TAG] $(date '+%Y-%m-%d %H:%M:%S') sync complete"
