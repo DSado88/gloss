@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { scanProjectsDir, syncToDb, clearDiscoveryCache, backfillTurnCounts, backfillFtsIndex, type DiscoveredSession } from "./discovery.js";
+import { scanProjectsDir, syncToDb, clearDiscoveryCache, backfillTurnCounts, backfillFtsIndex, classifyJsonlPath, canonicalRank, chooseCanonicalSession, type DiscoveredSession } from "./discovery.js";
 import { openDb, type ConvoDb } from "./db.js";
 
 function makeTempDir(): string {
@@ -707,5 +707,159 @@ describe("discovery", () => {
       ]);
       expect(db.getSession("s1")!.jsonl_path).toBe("/new/path.jsonl");
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Canonical file ranking — agent/temp files must never beat real main files
+// ---------------------------------------------------------------------------
+
+const UUID_A = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d";
+
+describe("classifyJsonlPath", () => {
+  it("detects agent files", () => {
+    expect(classifyJsonlPath(`/p/-Users-x-proj/agent-${UUID_A}.jsonl`).isAgentFile).toBe(true);
+    expect(classifyJsonlPath(`/p/-Users-x-proj/${UUID_A}.jsonl`).isAgentFile).toBe(false);
+  });
+
+  it("detects temp/private-var-folders project dirs (parent segment only)", () => {
+    expect(classifyJsonlPath(`/p/-private-var-folders-6n-abc123/${UUID_A}.jsonl`).isTempPath).toBe(true);
+    expect(classifyJsonlPath(`/p/-var-folders-6n-abc123/${UUID_A}.jsonl`).isTempPath).toBe(true);
+    expect(classifyJsonlPath(`/p/-tmp-scratch/${UUID_A}.jsonl`).isTempPath).toBe(true);
+    expect(classifyJsonlPath(`/p/-Users-x-proj/${UUID_A}.jsonl`).isTempPath).toBe(false);
+    // The scan root living under /tmp or /var/folders must NOT mark files temp
+    expect(classifyJsonlPath(`/var/folders/6n/abc/T/-Users-x-proj/${UUID_A}.jsonl`).isTempPath).toBe(false);
+  });
+
+  it("detects UUID-named files", () => {
+    expect(classifyJsonlPath(`/p/-Users-x-proj/${UUID_A}.jsonl`).isUuidNamed).toBe(true);
+    expect(classifyJsonlPath(`/p/-Users-x-proj/notes.jsonl`).isUuidNamed).toBe(false);
+    expect(classifyJsonlPath(`/p/-Users-x-proj/agent-${UUID_A}.jsonl`).isUuidNamed).toBe(false);
+  });
+});
+
+describe("canonicalRank", () => {
+  const base = { lastModified: 1000, fileSize: 10 };
+
+  it("ranks main file < normal file < agent file < temp file < filename fallback", () => {
+    const main = canonicalRank({ id: UUID_A, path: `/p/-Users-x-proj/${UUID_A}.jsonl`, hasParsedSessionId: true, ...base });
+    const normal = canonicalRank({ id: UUID_A, path: `/p/-Users-x-proj/copy.jsonl`, hasParsedSessionId: true, ...base });
+    const agent = canonicalRank({ id: UUID_A, path: `/p/-Users-x-proj/agent-bbb.jsonl`, hasParsedSessionId: true, ...base });
+    const temp = canonicalRank({ id: UUID_A, path: `/p/-private-var-folders-6n-x/${UUID_A}.jsonl`, hasParsedSessionId: true, ...base });
+    const fallback = canonicalRank({ id: "notes", path: `/p/-Users-x-proj/notes.jsonl`, hasParsedSessionId: false, ...base });
+
+    expect(main).toBeLessThan(normal);
+    expect(normal).toBeLessThan(agent);
+    expect(agent).toBeLessThan(temp);
+    expect(temp).toBeLessThan(fallback);
+  });
+});
+
+describe("chooseCanonicalSession", () => {
+  it("prefers the main file over a newer agent file", () => {
+    const main: DiscoveredSession = {
+      id: UUID_A, path: `/p/-Users-x-proj/${UUID_A}.jsonl`,
+      hasParsedSessionId: true, lastModified: 1000, fileSize: 10,
+    };
+    const agent: DiscoveredSession = {
+      id: UUID_A, path: `/p/-Users-x-proj/agent-ccc.jsonl`,
+      hasParsedSessionId: true, lastModified: 99999, fileSize: 999,
+    };
+    expect(chooseCanonicalSession([agent, main])).toBe(main);
+    expect(chooseCanonicalSession([main, agent])).toBe(main);
+  });
+
+  it("prefers a normal project file over a newer temp file", () => {
+    const normal: DiscoveredSession = {
+      id: UUID_A, path: `/p/-Users-x-proj/${UUID_A}.jsonl`,
+      hasParsedSessionId: true, lastModified: 1000, fileSize: 10,
+    };
+    const temp: DiscoveredSession = {
+      id: UUID_A, path: `/p/-private-var-folders-6n-x/${UUID_A}.jsonl`,
+      hasParsedSessionId: true, lastModified: 99999, fileSize: 999,
+    };
+    expect(chooseCanonicalSession([temp, normal])).toBe(normal);
+  });
+
+  it("breaks ties within the same rank by mtime", () => {
+    const older: DiscoveredSession = {
+      id: UUID_A, path: `/p/-Users-x-proj1/${UUID_A}.jsonl`,
+      hasParsedSessionId: true, lastModified: 1000, fileSize: 10,
+    };
+    const newer: DiscoveredSession = {
+      id: UUID_A, path: `/p/-Users-x-proj2/${UUID_A}.jsonl`,
+      hasParsedSessionId: true, lastModified: 2000, fileSize: 10,
+    };
+    expect(chooseCanonicalSession([older, newer])).toBe(newer);
+  });
+});
+
+describe("scanProjectsDir canonical ranking", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "convo-canonical-test-"));
+    clearDiscoveryCache();
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function writeJsonlWithSession(filePath: string, sessionId: string): void {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    const lines = [
+      JSON.stringify({ type: "summary", sessionId, cwd: "/home/user/project", version: "1.0.0" }),
+      JSON.stringify({ type: "user", sessionId, message: { content: "Hello" }, timestamp: "2024-01-15T10:30:00Z" }),
+    ];
+    fs.writeFileSync(filePath, lines.join("\n") + "\n", "utf-8");
+  }
+
+  it("main UUID file beats a newer agent file with the same sessionId", () => {
+    const projectDir = path.join(tempDir, "-Users-test-project");
+    const mainPath = path.join(projectDir, `${UUID_A}.jsonl`);
+    const agentPath = path.join(projectDir, `agent-deadbeef.jsonl`);
+    writeJsonlWithSession(mainPath, UUID_A);
+    writeJsonlWithSession(agentPath, UUID_A);
+    const future = Date.now() + 60000;
+    fs.utimesSync(agentPath, future / 1000, future / 1000);
+
+    const { sessions } = scanProjectsDir(tempDir);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].path).toBe(mainPath);
+  });
+
+  it("normal project file beats a newer private-var-folders file", () => {
+    const normalPath = path.join(tempDir, "-Users-test-project", `${UUID_A}.jsonl`);
+    const tempPath = path.join(tempDir, "-private-var-folders-6n-pxfd123", `${UUID_A}.jsonl`);
+    writeJsonlWithSession(normalPath, UUID_A);
+    writeJsonlWithSession(tempPath, UUID_A);
+    const future = Date.now() + 60000;
+    fs.utimesSync(tempPath, future / 1000, future / 1000);
+
+    const { sessions } = scanProjectsDir(tempDir);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].path).toBe(normalPath);
+  });
+
+  it("filename-fallback files rank below files with a parsed sessionId", () => {
+    // Two files produce the same session id: one parses it from content,
+    // one only has it as a filename (no sessionId in any line).
+    const parsedPath = path.join(tempDir, "-Users-test-a", "real.jsonl");
+    writeJsonlWithSession(parsedPath, "shared-xyz");
+
+    const fallbackPath = path.join(tempDir, "-Users-test-b", "shared-xyz.jsonl");
+    fs.mkdirSync(path.dirname(fallbackPath), { recursive: true });
+    fs.writeFileSync(
+      fallbackPath,
+      JSON.stringify({ type: "user", message: { content: "no session id here" } }) + "\n",
+      "utf-8",
+    );
+    const future = Date.now() + 60000;
+    fs.utimesSync(fallbackPath, future / 1000, future / 1000);
+
+    const { sessions } = scanProjectsDir(tempDir);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].path).toBe(parsedPath);
   });
 });

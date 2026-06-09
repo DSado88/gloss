@@ -12,11 +12,70 @@ export interface DiscoveredSession {
   startTime?: string;
   lastModified: number;
   fileSize: number;
+  /** True when the id was parsed from JSONL content (vs. filename fallback). */
+  hasParsedSessionId?: boolean;
 }
 
 export interface ScanResult {
   sessions: DiscoveredSession[];
   changedCount: number;  // How many files were new or modified
+}
+
+// ---------------------------------------------------------------------------
+// Canonical file ranking
+//
+// The same sessionId can appear in multiple JSONL files: the main transcript,
+// agent-*.jsonl subagent transcripts sharing the parent's id, copies in other
+// project dirs, and sessions started from temp cwds (-private-var-folders-*).
+// "Newest mtime wins" let agent/temp files silently become a session's
+// canonical file, which misanchors annotations keyed by turn/char offsets.
+// Rank candidates deterministically instead; mtime only breaks ties.
+// ---------------------------------------------------------------------------
+
+export interface JsonlPathClass {
+  isAgentFile: boolean;
+  isTempPath: boolean;
+  isUuidNamed: boolean;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Encoded project dir name for a session whose cwd was a temp location,
+// e.g. "-private-var-folders-6n-..." or "-tmp-scratch". Checked on the
+// parent dir segment only — the scan root itself may live under /tmp (tests).
+const TEMP_DIR_RE = /^(-private-var-folders|-var-folders|-tmp(-|$)|-private-tmp)/;
+
+export function classifyJsonlPath(filePath: string): JsonlPathClass {
+  const stem = path.parse(filePath).name;
+  const parentDir = path.basename(path.dirname(filePath));
+  return {
+    isAgentFile: stem.startsWith("agent-"),
+    isTempPath: TEMP_DIR_RE.test(parentDir),
+    isUuidNamed: UUID_RE.test(stem),
+  };
+}
+
+/** Lower rank = better canonical candidate. mtime must only break ties. */
+export function canonicalRank(session: DiscoveredSession): number {
+  if (session.hasParsedSessionId === false) return 6; // filename fallback only
+  const cls = classifyJsonlPath(session.path);
+  if (cls.isTempPath) return 5;
+  if (cls.isAgentFile) return 4;
+  // The main transcript is named after its own session id
+  if (path.parse(session.path).name === session.id) return 1;
+  return 2;
+}
+
+export function chooseCanonicalSession(candidates: DiscoveredSession[]): DiscoveredSession {
+  let best = candidates[0];
+  let bestRank = canonicalRank(best);
+  for (let i = 1; i < candidates.length; i++) {
+    const rank = canonicalRank(candidates[i]);
+    if (rank < bestRank || (rank === bestRank && candidates[i].lastModified > best.lastModified)) {
+      best = candidates[i];
+      bestRank = rank;
+    }
+  }
+  return best;
 }
 
 /** Cache of previously discovered sessions, keyed by JSONL path. */
@@ -120,6 +179,7 @@ export function scanProjectsDir(
         startTime: meta.startTime ?? undefined,
         lastModified: stat.mtimeMs,
         fileSize: stat.size,
+        hasParsedSessionId: meta.sessionId != null,
       };
       discoveryCache.set(filePath, { mtimeMs: stat.mtimeMs, session });
       sessions.push(session);
@@ -139,13 +199,12 @@ export function scanProjectsDir(
   }
 
   // Deduplicate: same session UUID can appear in multiple project dirs
-  // (context continuation). Keep the most recently modified copy.
+  // (context continuation) and in agent-*.jsonl files sharing the parent id.
+  // Deterministic canonical ranking; mtime only breaks ties within a rank.
   const byId = new Map<string, DiscoveredSession>();
   for (const s of sessions) {
     const existing = byId.get(s.id);
-    if (!existing || s.lastModified > existing.lastModified) {
-      byId.set(s.id, s);
-    }
+    byId.set(s.id, existing ? chooseCanonicalSession([existing, s]) : s);
   }
 
   return { sessions: Array.from(byId.values()), changedCount: changedCount + deletedCount };
