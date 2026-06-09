@@ -368,6 +368,30 @@ program
     db.close();
   });
 
+// ── Doctor: corpus + DB health report ──
+program
+  .command("doctor")
+  .description("Report ingestion/index/annotation health (read-only)")
+  .option("--json", "Machine-readable JSON output")
+  .option("--strict", "Exit non-zero on critical findings")
+  .action(async (options) => {
+    const { openDb } = await import("./db.js");
+    const { runDoctor, formatDoctorReport } = await import("./doctor.js");
+    const db = openDb();
+    const report = runDoctor(db);
+    db.close();
+
+    if (options.json) {
+      console.log(JSON.stringify(report, null, 2));
+    } else {
+      console.log(formatDoctorReport(report));
+    }
+
+    if (options.strict && report.hasCritical) {
+      process.exit(1);
+    }
+  });
+
 // ── Search exclusions ──
 program
   .command("search-exclude")

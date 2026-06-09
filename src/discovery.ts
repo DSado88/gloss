@@ -19,6 +19,8 @@ export interface DiscoveredSession {
 export interface ScanResult {
   sessions: DiscoveredSession[];
   changedCount: number;  // How many files were new or modified
+  /** Every discovered file pre-dedupe (only when collectAll is set). */
+  allSessions?: DiscoveredSession[];
 }
 
 // ---------------------------------------------------------------------------
@@ -129,8 +131,11 @@ function findJsonlFiles(dir: string): string[] {
  */
 export function scanProjectsDir(
   projectsDir?: string,
+  opts?: { collectAll?: boolean },
 ): ScanResult {
-  const dir = projectsDir ?? path.join(os.homedir(), ".claude", "projects");
+  const dir = projectsDir
+    ?? process.env.GLOSS_PROJECTS_DIR
+    ?? path.join(os.homedir(), ".claude", "projects");
   if (!fs.existsSync(dir)) return { sessions: [], changedCount: 0 };
 
   const jsonlFiles = findJsonlFiles(dir);
@@ -207,7 +212,11 @@ export function scanProjectsDir(
     byId.set(s.id, existing ? chooseCanonicalSession([existing, s]) : s);
   }
 
-  return { sessions: Array.from(byId.values()), changedCount: changedCount + deletedCount };
+  return {
+    sessions: Array.from(byId.values()),
+    changedCount: changedCount + deletedCount,
+    ...(opts?.collectAll ? { allSessions: sessions } : {}),
+  };
 }
 
 /**
