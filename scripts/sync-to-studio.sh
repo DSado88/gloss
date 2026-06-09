@@ -16,7 +16,9 @@ set -euo pipefail
 # Tailscale IP — plain hostname doesn't resolve from the laptop
 STUDIO_HOST="${GLOSS_STUDIO_HOST:-100.109.110.36}"
 SRC="$HOME/.claude/projects/"
-DEST="david@${STUDIO_HOST}:/Users/david/.claude/projects/"
+# Laptop logs land in their own root so source attribution is structural:
+# the Studio serves GLOSS_PROJECTS_ROOTS=studio=~/.claude/projects,mbp=~/.claude/projects-mbp
+DEST="david@${STUDIO_HOST}:/Users/david/.claude/projects-mbp/"
 LOG_TAG="gloss-sync"
 
 DRY_RUN=()

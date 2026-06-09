@@ -37,6 +37,9 @@
     <string>__GLOSS_AUTH_TOKEN__</string>
     <key>GLOSS_DISABLE_OS_ENDPOINTS</key>
     <string>1</string>
+    <!-- Studio-native logs + synced laptop logs, attributed by root -->
+    <key>GLOSS_PROJECTS_ROOTS</key>
+    <string>studio=/Users/david/.claude/projects,mbp=/Users/david/.claude/projects-mbp</string>
     <key>HOME</key>
     <string>/Users/david</string>
     <!-- bun's transpiler cache (~/Library/Caches/bun) has hung module loads

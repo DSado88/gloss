@@ -371,6 +371,7 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
         id: s.id,
         title: s.title ?? "",
         ...names,
+        source: s.source_machine ?? "",
         model: s.model ?? "",
         last_modified: s.last_modified ?? s.start_time ?? 0,
         turn_count: s.turn_count ?? 0,
@@ -759,6 +760,7 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
     <input class="search" id="search" type="text" placeholder="Search or ask a question..." autofocus>
     <button class="view-btn" id="askBtn" onclick="askAI()" style="display:none">Ask AI</button>
     <button class="view-btn" id="groupBtn" onclick="toggleGroup()">Group projects</button>
+    <span id="sourceChips" style="display:flex;gap:4px"></span>
     <div class="filter-wrap">
       <button class="view-btn filter-btn" id="filterBtn" onclick="toggleFilter()">Filter</button>
       <div class="filter-drop" id="filterDrop"></div>
@@ -856,6 +858,7 @@ let grouped = false;
 let query = '';
 let showCount = 80;
 let mutedProjects = new Set(JSON.parse(localStorage.getItem('gloss_muted_projects') || '[]'));
+let mutedSources = new Set(JSON.parse(localStorage.getItem('gloss_muted_sources') || '[]'));
 let sortCol = 'last_modified';
 let sortDir = -1; // -1 = descending, 1 = ascending
 let showHidden = false;
@@ -925,6 +928,9 @@ function filter(list) {
   }
   if (minTurnsFilter > 0) {
     out = out.filter(s => (s.turn_count || 0) >= minTurnsFilter);
+  }
+  if (mutedSources.size) {
+    out = out.filter(s => !mutedSources.has(s.source || 'unknown'));
   }
   if (mutedProjects.size) {
     out = out.filter(s => {
@@ -1248,6 +1254,39 @@ document.addEventListener('click', function(e) {
 
 // Init filter button state
 document.getElementById('filterBtn').classList.toggle('has-muted', mutedProjects.size > 0);
+
+// --- Source toggle (MBP vs Studio) ---
+// Chips appear only when the corpus has logs from more than one machine.
+function buildSourceChips() {
+  const wrap = document.getElementById('sourceChips');
+  if (!wrap) return;
+  const counts = new Map();
+  for (const s of ALL) {
+    const key = s.source || 'unknown';
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const sources = [...counts.keys()].sort();
+  if (sources.length < 2) { wrap.innerHTML = ''; return; }
+  let html = '';
+  for (const src of sources) {
+    const on = !mutedSources.has(src);
+    html += '<button class="view-btn' + (on ? ' active' : '') + '" data-source="' + esc(src) + '" ' +
+      'onclick="toggleSource(this.dataset.source)" title="' + counts.get(src) + ' sessions">' +
+      esc(src) + '</button>';
+  }
+  wrap.innerHTML = html;
+}
+
+function toggleSource(src) {
+  if (mutedSources.has(src)) mutedSources.delete(src);
+  else mutedSources.add(src);
+  localStorage.setItem('gloss_muted_sources', JSON.stringify([...mutedSources]));
+  showCount = 80;
+  buildSourceChips();
+  render();
+}
+
+buildSourceChips();
 
 function toggleShowHidden() {
   showHidden = !showHidden;

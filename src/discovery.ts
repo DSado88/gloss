@@ -14,6 +14,43 @@ export interface DiscoveredSession {
   fileSize: number;
   /** True when the id was parsed from JSONL content (vs. filename fallback). */
   hasParsedSessionId?: boolean;
+  /** Which machine's logs this file belongs to (from the scan root). */
+  source?: string;
+}
+
+export interface ProjectsRoot {
+  /** Source label persisted to sessions.source_machine (e.g. "mbp", "studio"). */
+  source: string;
+  path: string;
+}
+
+/**
+ * Resolve the set of scan roots.
+ *
+ * `GLOSS_PROJECTS_ROOTS="studio=/path/a,mbp=/path/b"` defines multiple roots
+ * with explicit source labels (the Studio hosts its own logs plus the synced
+ * laptop tree). Otherwise a single root: GLOSS_PROJECTS_DIR or the default
+ * ~/.claude/projects, labeled GLOSS_MACHINE_NAME (default "local").
+ */
+export function resolveProjectsRoots(
+  env: Record<string, string | undefined> = process.env,
+): ProjectsRoot[] {
+  const spec = env.GLOSS_PROJECTS_ROOTS;
+  if (spec) {
+    const roots: ProjectsRoot[] = [];
+    for (const part of spec.split(",")) {
+      const eq = part.indexOf("=");
+      if (eq === -1) continue;
+      const source = part.slice(0, eq).trim();
+      const rootPath = part.slice(eq + 1).trim();
+      if (source && rootPath) roots.push({ source, path: rootPath });
+    }
+    if (roots.length) return roots;
+  }
+  return [{
+    source: env.GLOSS_MACHINE_NAME || "local",
+    path: env.GLOSS_PROJECTS_DIR ?? path.join(os.homedir(), ".claude", "projects"),
+  }];
 }
 
 export interface ScanResult {
@@ -220,6 +257,40 @@ export function scanProjectsDir(
 }
 
 /**
+ * Scan every configured projects root, tagging sessions with their root's
+ * source label, then dedupe sessionIds across roots by canonical rank.
+ */
+export function scanAllProjects(
+  roots?: ProjectsRoot[],
+  opts?: { collectAll?: boolean },
+): ScanResult {
+  const resolved = roots ?? resolveProjectsRoots();
+  const byId = new Map<string, DiscoveredSession>();
+  const all: DiscoveredSession[] = [];
+  let changedCount = 0;
+
+  for (const root of resolved) {
+    const result = scanProjectsDir(root.path, opts);
+    changedCount += result.changedCount;
+    const tagged = (opts?.collectAll ? result.allSessions ?? result.sessions : result.sessions)
+      .map((s) => ({ ...s, source: root.source }));
+    if (opts?.collectAll) all.push(...tagged);
+    // Dedupe across roots using the per-root canonical winners
+    for (const s of result.sessions) {
+      const withSource = { ...s, source: root.source };
+      const existing = byId.get(s.id);
+      byId.set(s.id, existing ? chooseCanonicalSession([existing, withSource]) : withSource);
+    }
+  }
+
+  return {
+    sessions: Array.from(byId.values()),
+    changedCount,
+    ...(opts?.collectAll ? { allSessions: all } : {}),
+  };
+}
+
+/**
  * Sync discovered sessions into the SQLite database.
  */
 export function syncToDb(
@@ -232,6 +303,7 @@ export function syncToDb(
         id: session.id,
         jsonl_path: session.path,
         project: session.projectDir,
+        source_machine: session.source,
         model: session.model,
         start_time: session.startTime
           ? Math.floor(new Date(session.startTime).getTime() / 1000)

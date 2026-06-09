@@ -9,7 +9,7 @@ import { CSS_STYLES } from "./templates/css.js";
 import { renderTurn } from "./renderer.js";
 import { escape } from "./markdown.js";
 import { openDb, type ConvoDb } from "./db.js";
-import { scanProjectsDir, syncToDb, backfillTurnCounts, backfillFtsIndex } from "./discovery.js";
+import { scanAllProjects, syncToDb, backfillTurnCounts, backfillFtsIndex } from "./discovery.js";
 import { buildServerIndex, deriveProjectNames } from "./index-page.js";
 import { buildToolViewerPage, buildMemoryPage } from "./tool-viewer.js";
 import { EmbeddingEngine, VectorIndex } from "./embeddings.js";
@@ -289,7 +289,7 @@ export async function startServer(options: { port?: number } = {}): Promise<void
 
   // Discovery: scan and sync
   console.log("Scanning for conversations...");
-  const { sessions: discovered } = scanProjectsDir();
+  const { sessions: discovered } = scanAllProjects();
   syncToDb(db, discovered);
   console.log(`Found ${discovered.length} conversations`);
 
@@ -359,7 +359,7 @@ export async function startServer(options: { port?: number } = {}): Promise<void
   const scheduleRescan = () => {
     setTimeout(() => {
       try {
-        const { sessions: freshSessions, changedCount } = scanProjectsDir();
+        const { sessions: freshSessions, changedCount } = scanAllProjects();
         syncToDb(db, freshSessions);
 
         if (changedCount > 0) {
@@ -1355,6 +1355,7 @@ async function handleApiRouteInner(
       id: s.id,
       project: s.project ?? "",
       title: s.title ?? "",
+      source: s.source_machine ?? "",
       model: s.model ?? "",
       turn_count: s.turn_count ?? 0,
       last_modified: s.last_modified ?? s.start_time ?? 0,

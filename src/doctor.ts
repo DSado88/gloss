@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { scanProjectsDir, classifyJsonlPath, type DiscoveredSession } from "./discovery.js";
+import { scanAllProjects, resolveProjectsRoots, classifyJsonlPath, type DiscoveredSession, type ProjectsRoot } from "./discovery.js";
 import type { ConvoDb } from "./db.js";
 
 // ---------------------------------------------------------------------------
@@ -58,9 +58,10 @@ function lastByteIsNewline(filePath: string, size: number): boolean {
 }
 
 export function runDoctor(db: ConvoDb, projectsDirArg?: string): DoctorReport {
-  const projectsDir = projectsDirArg
-    ?? process.env.GLOSS_PROJECTS_DIR
-    ?? path.join(os.homedir(), ".claude", "projects");
+  const roots: ProjectsRoot[] = projectsDirArg
+    ? [{ source: "local", path: projectsDirArg }]
+    : resolveProjectsRoots();
+  const projectsDir = roots.map((r) => r.path).join(", ");
 
   const findings: DoctorFinding[] = [];
   const add = (severity: DoctorSeverity, code: string, message: string, items?: string[]) => {
@@ -74,7 +75,7 @@ export function runDoctor(db: ConvoDb, projectsDirArg?: string): DoctorReport {
   };
 
   // ---- Filesystem scan ----------------------------------------------------
-  const { sessions: canonical, allSessions = [] } = scanProjectsDir(projectsDir, { collectAll: true });
+  const { sessions: canonical, allSessions = [] } = scanAllProjects(roots, { collectAll: true });
 
   const emptyFiles = allSessions.filter((s) => s.fileSize === 0);
   add("info", "empty-jsonl", "Empty JSONL files", emptyFiles.map((s) => s.path));
@@ -147,7 +148,7 @@ export function runDoctor(db: ConvoDb, projectsDirArg?: string): DoctorReport {
       continue;
     }
 
-    if (!p.startsWith(projectsDir + path.sep)) {
+    if (!roots.some((r) => p.startsWith(r.path + path.sep))) {
       outsideDir.push(`${sess.id} → ${p}`);
     }
 

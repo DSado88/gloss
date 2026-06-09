@@ -12,6 +12,8 @@ export interface SessionRecord {
   jsonl_path?: string | null;
   title?: string | null;
   project?: string | null;
+  /** Which machine's logs this session came from (e.g. "mbp", "studio"). */
+  source_machine?: string | null;
   model?: string | null;
   start_time?: number | null;
   turn_count?: number | null;
@@ -91,6 +93,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   jsonl_path TEXT,
   title TEXT,
   project TEXT,
+  source_machine TEXT,
   model TEXT,
   start_time INTEGER,
   turn_count INTEGER,
@@ -261,12 +264,13 @@ export class ConvoDb {
 
   upsertSession(session: SessionRecord): void {
     this.db.run(
-      `INSERT INTO sessions (id, jsonl_path, title, project, model, start_time, turn_count, imported_at, last_modified, file_size)
-       VALUES (?, ?, ?, ?, ?, ?, ?, coalesce(?, unixepoch()), ?, ?)
+      `INSERT INTO sessions (id, jsonl_path, title, project, source_machine, model, start_time, turn_count, imported_at, last_modified, file_size)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, coalesce(?, unixepoch()), ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          jsonl_path     = coalesce(excluded.jsonl_path, jsonl_path),
          title          = coalesce(excluded.title, title),
          project        = coalesce(excluded.project, project),
+         source_machine = coalesce(excluded.source_machine, source_machine),
          model          = coalesce(excluded.model, model),
          start_time     = coalesce(excluded.start_time, start_time),
          turn_count     = coalesce(excluded.turn_count, turn_count),
@@ -277,6 +281,7 @@ export class ConvoDb {
         session.jsonl_path ?? null,
         session.title ?? null,
         session.project ?? null,
+        session.source_machine ?? null,
         session.model ?? null,
         session.start_time ?? null,
         session.turn_count ?? null,
@@ -1015,6 +1020,7 @@ export function openDb(dbPath?: string): ConvoDb {
   try { db.exec("ALTER TABLE sessions ADD COLUMN summary_source_mtime INTEGER"); } catch {}
   try { db.exec("ALTER TABLE sessions ADD COLUMN summary_status TEXT DEFAULT 'idle'"); } catch {}
   try { db.exec("ALTER TABLE sessions ADD COLUMN summary_error TEXT"); } catch {}
+  try { db.exec("ALTER TABLE sessions ADD COLUMN source_machine TEXT"); } catch {}
   try { db.exec("ALTER TABLE annotations ADD COLUMN prefix TEXT DEFAULT ''"); } catch {}
   try { db.exec("ALTER TABLE annotations ADD COLUMN suffix TEXT DEFAULT ''"); } catch {}
   try { db.exec(`ALTER TABLE annotations ADD COLUMN "trigger" TEXT DEFAULT ''`); } catch {}

@@ -604,3 +604,31 @@ describe("updateIndex", () => {
     expect(content).toContain("No conversations rendered yet.");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Source toggle (MBP vs Studio)
+// ---------------------------------------------------------------------------
+
+describe("source toggle", () => {
+  it("includes each session's source in the page data", () => {
+    const html = buildServerIndex([
+      { id: "s1", source_machine: "mbp" },
+      { id: "s2", source_machine: "studio" },
+    ] as any);
+    expect(html).toContain('"source":"mbp"');
+    expect(html).toContain('"source":"studio"');
+  });
+
+  it("renders the source chip container and toggle logic", () => {
+    const html = buildServerIndex([{ id: "s1", source_machine: "mbp" }] as any);
+    expect(html).toContain('id="sourceChips"');
+    expect(html).toContain("buildSourceChips");
+    expect(html).toContain("gloss_muted_sources");
+    expect(html).toContain("toggleSource");
+  });
+
+  it("defaults source to empty string when unattributed", () => {
+    const html = buildServerIndex([{ id: "s1" }] as any);
+    expect(html).toContain('"source":""');
+  });
+});

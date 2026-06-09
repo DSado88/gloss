@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { scanProjectsDir, syncToDb, clearDiscoveryCache, backfillTurnCounts, backfillFtsIndex, classifyJsonlPath, canonicalRank, chooseCanonicalSession, type DiscoveredSession } from "./discovery.js";
+import { scanProjectsDir, scanAllProjects, resolveProjectsRoots, syncToDb, clearDiscoveryCache, backfillTurnCounts, backfillFtsIndex, classifyJsonlPath, canonicalRank, chooseCanonicalSession, type DiscoveredSession } from "./discovery.js";
 import { openDb, type ConvoDb } from "./db.js";
 
 function makeTempDir(): string {
@@ -861,5 +861,90 @@ describe("scanProjectsDir canonical ranking", () => {
     const { sessions } = scanProjectsDir(tempDir);
     expect(sessions).toHaveLength(1);
     expect(sessions[0].path).toBe(parsedPath);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Multi-root scanning with source attribution (MBP vs Studio)
+// ---------------------------------------------------------------------------
+
+describe("multi-root source attribution", () => {
+  let rootA: string;
+  let rootB: string;
+
+  beforeEach(() => {
+    rootA = fs.mkdtempSync(path.join(os.tmpdir(), "convo-root-a-"));
+    rootB = fs.mkdtempSync(path.join(os.tmpdir(), "convo-root-b-"));
+    clearDiscoveryCache();
+    delete process.env.GLOSS_PROJECTS_ROOTS;
+    delete process.env.GLOSS_MACHINE_NAME;
+  });
+
+  afterEach(() => {
+    fs.rmSync(rootA, { recursive: true, force: true });
+    fs.rmSync(rootB, { recursive: true, force: true });
+    delete process.env.GLOSS_PROJECTS_ROOTS;
+    delete process.env.GLOSS_MACHINE_NAME;
+  });
+
+  it("resolveProjectsRoots parses name=path pairs", () => {
+    const roots = resolveProjectsRoots({ GLOSS_PROJECTS_ROOTS: `studio=${rootA},mbp=${rootB}` });
+    expect(roots).toEqual([
+      { source: "studio", path: rootA },
+      { source: "mbp", path: rootB },
+    ]);
+  });
+
+  it("resolveProjectsRoots falls back to single default root with machine name", () => {
+    const roots = resolveProjectsRoots({ GLOSS_PROJECTS_DIR: rootA, GLOSS_MACHINE_NAME: "mbp" });
+    expect(roots).toEqual([{ source: "mbp", path: rootA }]);
+  });
+
+  it("scanAllProjects tags sessions with their root's source", () => {
+    writeMinimalJsonl(path.join(rootA, "-Users-x-proj", "aaa.jsonl"), "aaa");
+    writeMinimalJsonl(path.join(rootB, "-Users-x-proj", "bbb.jsonl"), "bbb");
+
+    const { sessions } = scanAllProjects([
+      { source: "studio", path: rootA },
+      { source: "mbp", path: rootB },
+    ]);
+    expect(sessions).toHaveLength(2);
+    const a = sessions.find((s) => s.id === "aaa")!;
+    const b = sessions.find((s) => s.id === "bbb")!;
+    expect(a.source).toBe("studio");
+    expect(b.source).toBe("mbp");
+  });
+
+  it("scanAllProjects dedupes the same sessionId across roots by canonical rank", () => {
+    // agent file in root A, main file in root B — main must win despite newer agent mtime
+    const agentPath = path.join(rootA, "-Users-x-proj", "agent-zzz.jsonl");
+    const mainPath = path.join(rootB, "-Users-x-proj", "shared.jsonl");
+    writeMinimalJsonl(agentPath, "shared");
+    writeMinimalJsonl(mainPath, "shared");
+    const future = Date.now() + 60000;
+    fs.utimesSync(agentPath, future / 1000, future / 1000);
+
+    const { sessions } = scanAllProjects([
+      { source: "studio", path: rootA },
+      { source: "mbp", path: rootB },
+    ]);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].path).toBe(mainPath);
+    expect(sessions[0].source).toBe("mbp");
+  });
+
+  it("syncToDb persists source_machine", () => {
+    const dbDir = fs.mkdtempSync(path.join(os.tmpdir(), "convo-srcdb-"));
+    const db = openDb(path.join(dbDir, "t.sqlite"));
+    try {
+      syncToDb(db, [
+        { id: "s1", path: "/a/x.jsonl", lastModified: Date.now(), fileSize: 10, source: "mbp" },
+      ]);
+      const row = db.db.query("SELECT source_machine FROM sessions WHERE id = 's1'").get() as { source_machine: string };
+      expect(row.source_machine).toBe("mbp");
+    } finally {
+      db.close();
+      fs.rmSync(dbDir, { recursive: true, force: true });
+    }
   });
 });
