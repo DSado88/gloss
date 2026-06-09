@@ -15,6 +15,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 const GLOSS_URL = process.env.GLOSS_URL ?? "http://localhost:3456";
+// Required when GLOSS_URL points at a remote-mode server (GLOSS_REMOTE=1)
+const GLOSS_AUTH_TOKEN = process.env.GLOSS_AUTH_TOKEN ?? "";
 const FETCH_TIMEOUT_MS = 30_000;
 
 // ---------------------------------------------------------------------------
@@ -22,11 +24,14 @@ const FETCH_TIMEOUT_MS = 30_000;
 // ---------------------------------------------------------------------------
 
 async function glossFetch(path: string, opts?: RequestInit): Promise<unknown> {
+  const headers = new Headers(opts?.headers);
+  if (GLOSS_AUTH_TOKEN) headers.set("Authorization", `Bearer ${GLOSS_AUTH_TOKEN}`);
   let res: Response;
   try {
     res = await fetch(`${GLOSS_URL}${path}`, {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       ...opts,
+      headers,
     });
   } catch (e) {
     if (e instanceof TypeError && (e.message.includes("ECONNREFUSED") || e.message.includes("fetch failed"))) {
