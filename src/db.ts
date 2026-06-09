@@ -148,7 +148,9 @@ CREATE TABLE IF NOT EXISTS fts_status (
   session_id TEXT PRIMARY KEY,
   indexed_at INTEGER NOT NULL DEFAULT (unixepoch()),
   turn_count INTEGER NOT NULL DEFAULT 0,
-  file_mtime INTEGER NOT NULL DEFAULT 0
+  file_mtime INTEGER NOT NULL DEFAULT 0,
+  file_mtime_ms INTEGER NOT NULL DEFAULT 0,
+  file_size INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS conversation_fts USING fts5(
@@ -186,6 +188,8 @@ CREATE TABLE IF NOT EXISTS embedding_status (
   indexed_at INTEGER NOT NULL DEFAULT (unixepoch()),
   turn_count INTEGER NOT NULL DEFAULT 0,
   file_mtime INTEGER NOT NULL DEFAULT 0,
+  file_mtime_ms INTEGER NOT NULL DEFAULT 0,
+  file_size INTEGER NOT NULL DEFAULT 0,
   model_name TEXT NOT NULL DEFAULT 'snowflake-arctic-embed-m-v2.0'
 );
 `;
@@ -624,15 +628,34 @@ export class ConvoDb {
 
   // ---- Full-text search ---------------------------------------------------
 
-  /** Check if a session needs (re)indexing based on file mtime */
-  ftsNeedsIndexing(sessionId: string, fileMtime: number): boolean {
-    const row = this.db.query("SELECT file_mtime FROM fts_status WHERE session_id = ?").get(sessionId) as { file_mtime: number } | null;
+  /**
+   * Shared freshness check. New rows compare millisecond mtime + file size
+   * (any change → reindex, including backdated mtimes from sync tools).
+   * Legacy rows (file_mtime_ms = 0) keep the old seconds-only comparison so
+   * an upgrade doesn't trigger a mass reindex of every session.
+   */
+  private statusNeedsIndexing(
+    row: { file_mtime: number; file_mtime_ms: number; file_size: number } | null,
+    fileMtimeMs: number,
+    fileSize: number,
+  ): boolean {
     if (!row) return true; // never indexed
-    return fileMtime > row.file_mtime; // file changed since last index
+    if (row.file_mtime_ms > 0) {
+      return fileMtimeMs !== row.file_mtime_ms || fileSize !== row.file_size;
+    }
+    return Math.floor(fileMtimeMs / 1000) > row.file_mtime;
+  }
+
+  /** Check if a session needs (re)indexing based on file mtimeMs + size */
+  ftsNeedsIndexing(sessionId: string, fileMtimeMs: number, fileSize = 0): boolean {
+    const row = this.db
+      .query("SELECT file_mtime, file_mtime_ms, file_size FROM fts_status WHERE session_id = ?")
+      .get(sessionId) as { file_mtime: number; file_mtime_ms: number; file_size: number } | null;
+    return this.statusNeedsIndexing(row, fileMtimeMs, fileSize);
   }
 
   /** Index a session's turns into FTS. Replaces any existing index for the session. */
-  indexSession(sessionId: string, turns: { role: string; text: string }[], fileMtime: number): void {
+  indexSession(sessionId: string, turns: { role: string; text: string }[], fileMtimeMs: number, fileSize = 0): void {
     const insertMap = this.db.prepare(
       "INSERT INTO fts_map (session_id, turn_index, role) VALUES (?, ?, ?)",
     );
@@ -640,7 +663,7 @@ export class ConvoDb {
       "INSERT INTO conversation_fts (rowid, text) VALUES (?, ?)",
     );
     const insertStatus = this.db.prepare(
-      "INSERT OR REPLACE INTO fts_status (session_id, indexed_at, turn_count, file_mtime) VALUES (?, unixepoch(), ?, ?)",
+      "INSERT OR REPLACE INTO fts_status (session_id, indexed_at, turn_count, file_mtime, file_mtime_ms, file_size) VALUES (?, unixepoch(), ?, ?, ?, ?)",
     );
 
     this.db.exec("BEGIN");
@@ -653,7 +676,7 @@ export class ConvoDb {
         const { lastInsertRowid } = insertMap.run(sessionId, i, turns[i].role);
         insertFts.run(lastInsertRowid, text);
       }
-      insertStatus.run(sessionId, turns.length, fileMtime);
+      insertStatus.run(sessionId, turns.length, Math.floor(fileMtimeMs / 1000), fileMtimeMs, fileSize);
       this.db.exec("COMMIT");
     } catch (e) {
       this.db.exec("ROLLBACK");
@@ -738,7 +761,7 @@ export class ConvoDb {
   setSetting(key: string, value: string): void {
     this.db.run(
       "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-      key, value,
+      [key, value],
     );
   }
 
@@ -756,11 +779,12 @@ export class ConvoDb {
 
   // ---- Embeddings ---------------------------------------------------------
 
-  /** Check if a session needs embedding (re)indexing based on file mtime. */
-  embeddingNeedsIndexing(sessionId: string, fileMtime: number): boolean {
-    const row = this.db.query("SELECT file_mtime FROM embedding_status WHERE session_id = ?").get(sessionId) as { file_mtime: number } | null;
-    if (!row) return true;
-    return fileMtime > row.file_mtime;
+  /** Check if a session needs embedding (re)indexing based on file mtimeMs + size. */
+  embeddingNeedsIndexing(sessionId: string, fileMtimeMs: number, fileSize = 0): boolean {
+    const row = this.db
+      .query("SELECT file_mtime, file_mtime_ms, file_size FROM embedding_status WHERE session_id = ?")
+      .get(sessionId) as { file_mtime: number; file_mtime_ms: number; file_size: number } | null;
+    return this.statusNeedsIndexing(row, fileMtimeMs, fileSize);
   }
 
   /** Store embeddings for a session's turns. Replaces any existing. */
@@ -772,7 +796,8 @@ export class ConvoDb {
       textHash: string;
       embedding: Float32Array;
     }>,
-    fileMtime: number,
+    fileMtimeMs: number,
+    fileSize = 0,
   ): void {
     this.db.exec("BEGIN");
     try {
@@ -788,8 +813,8 @@ export class ConvoDb {
       }
 
       this.db.run(
-        "INSERT OR REPLACE INTO embedding_status (session_id, indexed_at, turn_count, file_mtime) VALUES (?, unixepoch(), ?, ?)",
-        [sessionId, entries.length, fileMtime],
+        "INSERT OR REPLACE INTO embedding_status (session_id, indexed_at, turn_count, file_mtime, file_mtime_ms, file_size) VALUES (?, unixepoch(), ?, ?, ?, ?)",
+        [sessionId, entries.length, Math.floor(fileMtimeMs / 1000), fileMtimeMs, fileSize],
       );
 
       this.db.exec("COMMIT");
@@ -896,6 +921,10 @@ export function openDb(dbPath?: string): ConvoDb {
   try { db.exec("ALTER TABLE sessions ADD COLUMN last_modified INTEGER"); } catch {}
   try { db.exec("ALTER TABLE sessions ADD COLUMN file_size INTEGER"); } catch {}
   try { db.exec("ALTER TABLE fts_status ADD COLUMN file_mtime INTEGER NOT NULL DEFAULT 0"); } catch {}
+  try { db.exec("ALTER TABLE fts_status ADD COLUMN file_mtime_ms INTEGER NOT NULL DEFAULT 0"); } catch {}
+  try { db.exec("ALTER TABLE fts_status ADD COLUMN file_size INTEGER NOT NULL DEFAULT 0"); } catch {}
+  try { db.exec("ALTER TABLE embedding_status ADD COLUMN file_mtime_ms INTEGER NOT NULL DEFAULT 0"); } catch {}
+  try { db.exec("ALTER TABLE embedding_status ADD COLUMN file_size INTEGER NOT NULL DEFAULT 0"); } catch {}
   try { db.exec("ALTER TABLE sessions ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0"); } catch {}
   try { db.exec("ALTER TABLE sessions ADD COLUMN summary TEXT"); } catch {}
   try { db.exec("ALTER TABLE sessions ADD COLUMN summary_source_mtime INTEGER"); } catch {}

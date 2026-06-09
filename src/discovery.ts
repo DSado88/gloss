@@ -376,15 +376,14 @@ export function backfillFtsIndex(db: ConvoDb, onComplete?: () => void): void {
   }>;
 
   // Check each session: needs indexing if never indexed or file changed since last index
-  const needsIndexing: Array<{ id: string; jsonl_path: string; mtime: number }> = [];
+  const needsIndexing: Array<{ id: string; jsonl_path: string; mtimeMs: number; size: number }> = [];
   for (const s of sessions) {
     if (!s.jsonl_path) continue;
     try {
       const stat = fs.statSync(s.jsonl_path);
       if (!stat.isFile() || stat.size > FTS_INDEX_LIMIT) continue;
-      const mtime = Math.floor(stat.mtimeMs / 1000);
-      if (db.ftsNeedsIndexing(s.id, mtime)) {
-        needsIndexing.push({ id: s.id, jsonl_path: s.jsonl_path, mtime });
+      if (db.ftsNeedsIndexing(s.id, stat.mtimeMs, stat.size)) {
+        needsIndexing.push({ id: s.id, jsonl_path: s.jsonl_path, mtimeMs: stat.mtimeMs, size: stat.size });
       }
     } catch {
       continue;
@@ -418,7 +417,7 @@ export function backfillFtsIndex(db: ConvoDb, onComplete?: () => void): void {
             .join("\n"),
         }));
 
-        db.indexSession(s.id, ftsData, s.mtime);
+        db.indexSession(s.id, ftsData, s.mtimeMs, s.size);
         indexed++;
       } catch {
         // skip unreadable files

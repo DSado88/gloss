@@ -560,8 +560,8 @@ describe("discovery", () => {
 
       // Session should be marked as indexed (not re-indexed every cycle)
       expect(db.ftsIndexedCount()).toBe(1);
-      const mtime = Math.floor(fs.statSync(filePath).mtimeMs / 1000);
-      expect(db.ftsNeedsIndexing("tools-only", mtime)).toBe(false);
+      const stat = fs.statSync(filePath);
+      expect(db.ftsNeedsIndexing("tools-only", stat.mtimeMs, stat.size)).toBe(false);
 
       // Searching should return no results (no text to match)
       const results = db.searchSessions("file contents", 10);

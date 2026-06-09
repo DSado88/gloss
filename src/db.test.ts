@@ -1315,3 +1315,99 @@ describe("ConvoDb", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Index freshness: millisecond mtime + file size (Studio sync hardening)
+// ---------------------------------------------------------------------------
+
+describe("index freshness (mtimeMs + size)", () => {
+  let tempDir: string;
+  let db: ConvoDb;
+
+  beforeEach(() => {
+    tempDir = makeTempDir();
+    db = openDb(path.join(tempDir, "test.sqlite"));
+  });
+
+  afterEach(() => {
+    db.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  describe("FTS", () => {
+    it("reindexes when mtime changes within the same second", () => {
+      // 1000999 and 1000001 are both second 1000 — old seconds-only logic missed this
+      db.indexSession("s1", [{ role: "user", text: "hello" }], 1000001, 50);
+      expect(db.ftsNeedsIndexing("s1", 1000999, 50)).toBe(true);
+    });
+
+    it("reindexes when size changes but mtimeMs is identical", () => {
+      db.indexSession("s2", [{ role: "user", text: "hello" }], 1000001, 50);
+      expect(db.ftsNeedsIndexing("s2", 1000001, 99)).toBe(true);
+    });
+
+    it("does not reindex when mtimeMs and size are unchanged", () => {
+      db.indexSession("s3", [{ role: "user", text: "hello" }], 1000001, 50);
+      expect(db.ftsNeedsIndexing("s3", 1000001, 50)).toBe(false);
+    });
+
+    it("reindexes when mtimeMs moves backwards (sync can backdate files)", () => {
+      db.indexSession("s4", [{ role: "user", text: "hello" }], 2000000, 50);
+      expect(db.ftsNeedsIndexing("s4", 1000000, 50)).toBe(true);
+    });
+
+    it("migrates legacy seconds-only rows without mass reindexing", () => {
+      // Simulate a pre-migration row: file_mtime in seconds, no ms/size
+      db.db.run(
+        "INSERT INTO fts_status (session_id, turn_count, file_mtime) VALUES (?, ?, ?)",
+        ["legacy", 1, 1000],
+      );
+      // Same second → still considered fresh (no mass reindex on upgrade)
+      expect(db.ftsNeedsIndexing("legacy", 1000500, 50)).toBe(false);
+      // Later second → reindex
+      expect(db.ftsNeedsIndexing("legacy", 1001500, 50)).toBe(true);
+    });
+
+    it("persists both mtimeMs and size on index write", () => {
+      db.indexSession("s5", [{ role: "user", text: "hello" }], 1234567, 42);
+      const row = db.db
+        .query("SELECT file_mtime_ms, file_size FROM fts_status WHERE session_id = ?")
+        .get("s5") as { file_mtime_ms: number; file_size: number };
+      expect(row.file_mtime_ms).toBe(1234567);
+      expect(row.file_size).toBe(42);
+    });
+  });
+
+  describe("embeddings", () => {
+    const entry = {
+      turnIndex: 0,
+      role: "user",
+      textHash: "h",
+      embedding: new Float32Array(256),
+    };
+
+    it("reindexes when mtime changes within the same second", () => {
+      db.storeEmbeddings("e1", [entry], 1000001, 50);
+      expect(db.embeddingNeedsIndexing("e1", 1000999, 50)).toBe(true);
+    });
+
+    it("reindexes when size changes but mtimeMs is identical", () => {
+      db.storeEmbeddings("e2", [entry], 1000001, 50);
+      expect(db.embeddingNeedsIndexing("e2", 1000001, 99)).toBe(true);
+    });
+
+    it("does not reindex when mtimeMs and size are unchanged", () => {
+      db.storeEmbeddings("e3", [entry], 1000001, 50);
+      expect(db.embeddingNeedsIndexing("e3", 1000001, 50)).toBe(false);
+    });
+
+    it("migrates legacy seconds-only rows without mass reindexing", () => {
+      db.db.run(
+        "INSERT INTO embedding_status (session_id, turn_count, file_mtime) VALUES (?, ?, ?)",
+        ["legacy-e", 1, 1000],
+      );
+      expect(db.embeddingNeedsIndexing("legacy-e", 1000500, 50)).toBe(false);
+      expect(db.embeddingNeedsIndexing("legacy-e", 1001500, 50)).toBe(true);
+    });
+  });
+});

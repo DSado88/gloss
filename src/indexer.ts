@@ -108,16 +108,15 @@ async function runBackfill(
 
   // Find sessions needing embedding — skip sessions below the turn threshold
   const threshold = minTurns > 0 ? minTurns : 3;
-  const needsIndexing: Array<{ id: string; jsonl_path: string; mtime: number }> = [];
+  const needsIndexing: Array<{ id: string; jsonl_path: string; mtimeMs: number; size: number }> = [];
   for (const s of sessions) {
     if (!s.jsonl_path) continue;
     if ((s.turn_count ?? 0) < threshold) continue;
     try {
       const stat = fs.statSync(s.jsonl_path);
       if (!stat.isFile() || stat.size > EMBEDDING_INDEX_LIMIT || stat.size < EMBEDDING_MIN_SIZE) continue;
-      const mtime = Math.floor(stat.mtimeMs / 1000);
-      if (db.embeddingNeedsIndexing(s.id, mtime)) {
-        needsIndexing.push({ id: s.id, jsonl_path: s.jsonl_path, mtime });
+      if (db.embeddingNeedsIndexing(s.id, stat.mtimeMs, stat.size)) {
+        needsIndexing.push({ id: s.id, jsonl_path: s.jsonl_path, mtimeMs: stat.mtimeMs, size: stat.size });
       }
     } catch {
       continue;
@@ -127,7 +126,7 @@ async function runBackfill(
   if (needsIndexing.length === 0) return;
 
   // Sort by mtime descending so recent conversations get embedded first
-  needsIndexing.sort((a, b) => b.mtime - a.mtime);
+  needsIndexing.sort((a, b) => b.mtimeMs - a.mtimeMs);
 
   console.log(`[embeddings] Backfill: ${needsIndexing.length} sessions to index`);
   let indexed = 0;
@@ -184,7 +183,7 @@ async function runBackfill(
       }
 
       // Store in DB
-      db.storeEmbeddings(s.id, entries, s.mtime);
+      db.storeEmbeddings(s.id, entries, s.mtimeMs, s.size);
 
       // Update in-memory vector index
       if (vectorIndex) {
