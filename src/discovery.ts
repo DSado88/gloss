@@ -231,10 +231,13 @@ export function scanProjectsDir(
     }
   }
 
-  // Clean up cache entries for deleted files
+  // Clean up cache entries for deleted files — only within THIS root.
+  // The cache is shared across roots; treating another root's paths as
+  // deleted would evict its entries on every scan and force full re-reads.
   let deletedCount = 0;
+  const dirPrefix = dir.endsWith(path.sep) ? dir : dir + path.sep;
   for (const [cachedPath] of discoveryCache) {
-    if (!currentPaths.has(cachedPath)) {
+    if (cachedPath.startsWith(dirPrefix) && !currentPaths.has(cachedPath)) {
       discoveryCache.delete(cachedPath);
       deletedCount++;
     }

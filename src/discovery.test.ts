@@ -900,6 +900,26 @@ describe("multi-root source attribution", () => {
     expect(roots).toEqual([{ source: "mbp", path: rootA }]);
   });
 
+
+  it("rescan of multiple roots keeps each root's mtime cache intact (changedCount=0 on no-change rescan)", () => {
+    // Bug: the cache eviction pass treated any cached path outside the
+    // currently scanned root as "deleted", so scanning root A evicted all of
+    // root B's entries and vice versa — every multi-root rescan re-read the
+    // entire corpus and reported everything as changed.
+    writeMinimalJsonl(path.join(rootA, "-Users-x-proj", "aaa.jsonl"), "aaa");
+    writeMinimalJsonl(path.join(rootB, "-Users-x-proj", "bbb.jsonl"), "bbb");
+    const roots = [
+      { source: "studio", path: rootA },
+      { source: "mbp", path: rootB },
+    ];
+
+    const first = scanAllProjects(roots);
+    expect(first.changedCount).toBe(2);
+
+    const second = scanAllProjects(roots);
+    expect(second.changedCount).toBe(0);
+  });
+
   it("scanAllProjects tags sessions with their root's source", () => {
     writeMinimalJsonl(path.join(rootA, "-Users-x-proj", "aaa.jsonl"), "aaa");
     writeMinimalJsonl(path.join(rootB, "-Users-x-proj", "bbb.jsonl"), "bbb");
