@@ -134,6 +134,8 @@ server config for `gloss`:
 | `GLOSS_BIND_HOST` | Interface to bind (Studio: the Tailscale IP) |
 | `GLOSS_DISABLE_OS_ENDPOINTS` | Defaults to `1` in remote mode; `0` re-enables (don't) |
 | `GLOSS_PROJECTS_DIR` | Override the scan root (default `~/.claude/projects`) |
+| `GLOSS_PROJECTS_ROOTS` | Multi-root scan with source attribution: `name=path,name=path` (Studio: `studio=~/.claude/projects,mbp=~/.claude/projects-mbp`). Takes precedence over `GLOSS_PROJECTS_DIR`. Each root's sessions get that name as `source_machine`; the Sources toggle in index Settings appears when >1 source |
+| `GLOSS_MACHINE_NAME` | Source label for single-root scans (default `local`) |
 | `CONVO_DB_PATH` | Override the DB path (default `~/.convo/db.sqlite`) |
 
 ## Recovery
