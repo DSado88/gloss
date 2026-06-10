@@ -119,11 +119,22 @@ server config for `gloss`:
 ```json
 "env": {
   "GLOSS_URL": "http://100.109.110.36:3456",
-  "GLOSS_AUTH_TOKEN": "<TOKEN>"
+  "GLOSS_AUTH_TOKEN": "<TOKEN>",
+  "GLOSS_SYNC_CMD": "/Users/david/.local/bin/gloss-sync-to-studio.sh"
 }
 ```
 
 (While the laptop still runs its own local Gloss, leave this unset.)
+
+`GLOSS_SYNC_CMD` makes every MCP tool call push this machine's freshest logs
+first (debounced 60s) and then `POST /api/scan`, which forces an immediate
+rescan instead of waiting for the 1–5 min timer. Any sync client can use
+`/api/scan` the same way:
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" http://100.109.110.36:3456/api/scan
+# → {"ok":true,"changedCount":N,"total":M}
+```
 
 ## Environment variable reference
 
