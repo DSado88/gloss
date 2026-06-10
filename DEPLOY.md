@@ -50,7 +50,12 @@ If the client and server use the same username, the seeded DB's `jsonl_path`s
 resolve as-is. Different usernames: let the server's first scan rebuild paths
 (the JSONLs are the source of truth).
 
-## 2. Server (LaunchAgent)
+## 2. Server (LaunchDaemon)
+
+Install as a **LaunchDaemon**, not a LaunchAgent: agents live in the GUI
+login session and die the moment that user logs out (we learned this the
+hard way — the server silently vanished when the account got logged out).
+Daemons run from boot, no login required.
 
 Fill in the placeholders in `deploy/macos/gloss.plist.template` (instructions
 are in the template header) and bootstrap it:
@@ -62,10 +67,12 @@ sed -e "s|__USERNAME__|$(whoami)|g" \
     -e "s|__INSTALL_DIR__|$HOME/gloss|g" \
     -e "s|__GLOSS_AUTH_TOKEN__|$(openssl rand -hex 32)|g" \
     deploy/macos/gloss.plist.template \
-    > ~/Library/LaunchAgents/com.gloss.server.plist
-chmod 600 ~/Library/LaunchAgents/com.gloss.server.plist
-grep GLOSS_AUTH_TOKEN -A1 ~/Library/LaunchAgents/com.gloss.server.plist  # save the token in a password manager
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.gloss.server.plist
+    > /tmp/com.gloss.server.plist
+grep GLOSS_AUTH_TOKEN -A1 /tmp/com.gloss.server.plist  # save the token in a password manager
+sudo mv /tmp/com.gloss.server.plist /Library/LaunchDaemons/com.gloss.server.plist
+sudo chown root:wheel /Library/LaunchDaemons/com.gloss.server.plist
+sudo chmod 600 /Library/LaunchDaemons/com.gloss.server.plist   # the plist contains the token
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.gloss.server.plist
 ```
 
 Multi-machine corpora: uncomment `GLOSS_PROJECTS_ROOTS` in the plist so the
@@ -74,7 +81,7 @@ server's own logs and each synced client tree get distinct source labels
 disjoint directories — the server refuses nested roots.
 
 Logs: `~/Library/Logs/gloss.log` / `gloss.err.log`.
-Restart after pulling new code: `launchctl kickstart -k gui/$(id -u)/com.gloss.server`.
+Restart after pulling new code: `sudo launchctl kickstart -k system/com.gloss.server`.
 
 ## 3. Client sync (LaunchAgent, every 5 min)
 

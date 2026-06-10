@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Gloss server LaunchAgent template (macOS, headless/remote mode).
+  Gloss server LaunchDaemon template (macOS, headless/remote mode).
+
+  Install as a LaunchDaemon (system domain), NOT a LaunchAgent: agents run
+  inside a GUI login session and are killed when that user logs out. The
+  daemon runs as __USERNAME__ via the UserName key.
 
   Placeholders to replace before installing:
     __USERNAME__          your macOS username (e.g. alice)
@@ -17,9 +21,11 @@
         -e "s|__INSTALL_DIR__|$HOME/gloss|g" \
         -e "s|__GLOSS_AUTH_TOKEN__|$(openssl rand -hex 32)|g" \
         deploy/macos/gloss.plist.template \
-        > ~/Library/LaunchAgents/com.gloss.server.plist
-    chmod 600 ~/Library/LaunchAgents/com.gloss.server.plist
-    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.gloss.server.plist
+        > /tmp/com.gloss.server.plist
+    sudo mv /tmp/com.gloss.server.plist /Library/LaunchDaemons/com.gloss.server.plist
+    sudo chown root:wheel /Library/LaunchDaemons/com.gloss.server.plist
+    sudo chmod 600 /Library/LaunchDaemons/com.gloss.server.plist
+    sudo launchctl bootstrap system /Library/LaunchDaemons/com.gloss.server.plist
 
   See DEPLOY.md for the full runbook.
 -->
@@ -27,6 +33,11 @@
 <dict>
   <key>Label</key>
   <string>com.gloss.server</string>
+
+  <key>UserName</key>
+  <string>__USERNAME__</string>
+  <key>GroupName</key>
+  <string>staff</string>
 
   <key>ProgramArguments</key>
   <array>
