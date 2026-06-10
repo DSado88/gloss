@@ -1,0 +1,45 @@
+//repeat 45 60 180 You are running an overnight QA loop on Gloss (convo-viewer), a conversation viewer and search engine for Claude Code sessions. Stack: Bun + TypeScript + SQLite (via bun:sqlite). Your mission: find bugs, write tests, fix issues, commit each fix.
+
+SETUP: cd /Users/david/Documents/Programs/convo-viewer
+
+CYCLE (do exactly this each iteration):
+1. Run: bun test 2>&1 | tail -20
+   If failures: fix them first, commit, move on.
+
+2. Pick ONE area from this rotation (cycle through, don't repeat the same area twice in a row):
+   a) JSONL parser (src/incremental-parser.ts) — edge cases: malformed JSON lines, truncated files, gigabyte-sized conversations, unicode in thinking blocks, empty tool results, nested JSON in content blocks, messages with missing required fields, active session mid-write partial lines
+   b) Markdown renderer (src/markdown.ts) — edge cases: deeply nested code blocks, code blocks inside thinking, unmatched backticks, HTML injection in user messages, zero-width chars, extremely long lines, mixed markdown + raw HTML, links with special chars, target="_blank" on external links only
+   c) Server routes (src/server.ts) — edge cases: concurrent requests to same conversation, requesting nonexistent session IDs, path traversal in session IDs, oversized POST bodies, malformed annotation JSON, race conditions on SQLite writes, /api/tags with no annotations, /api/sessions/:id/summary with missing file
+   d) Discovery (src/discovery.ts) — edge cases: symlinked project dirs, deeply nested subagent conversations, conversations with no turns, duplicate session IDs across projects, permission denied on dirs, .jsonl files that aren't Claude conversations
+   e) Database layer (src/db.ts) — edge cases: concurrent read/write, schema migration on existing data, corrupted SQLite file, annotations on deleted conversations, search with special regex chars, SQL injection via search terms, summary lifecycle (setSummaryDone/Error/Generating/clear)
+   f) HTML renderer (src/renderer.ts) — edge cases: conversations with 1000+ turns, tool calls with binary output, thinking blocks with code that contains </script>, tool result headers (single caret only), cross-element highlights
+   g) Index page (src/index-page.ts) — edge cases: hundreds of conversations, conversations with zero turns, extremely long project paths, special chars in conversation summaries, sorting edge cases (same timestamp), deriveProjectNames with edge-case paths, preview toggle state, click-outside dismiss, search result project name mapping
+   h) Summary generation (src/summary.ts) — edge cases: empty conversations, conversations with only tool calls (no text), extremely large files (>100MB), concurrent summary requests (dedup map), buildExcerpt with <4 turns, summary cache freshness (source mtime equality), max concurrent spawns limit, timeout handling
+   i) Memory page (src/tool-viewer.ts) — edge cases: MEMORY.md pinning to top, alphabetical sort within projects, memory files with no frontmatter, memory files with malformed YAML, type badge color mapping, empty project groups
+   j) MCP server (src/mcp-server.ts) — edge cases: search with empty query, read_conversation with out-of-range turns, list_tags with no tags, get_highlights with nonexistent tag, list_sessions with unknown project filter
+
+3. For your chosen area:
+   - Read the source file AND the corresponding test file (e.g., summary.ts + summary.test.ts)
+   - Find ONE untested edge case
+   - Write a FAILING test first (TDD red) — the test must fail before your fix
+   - Fix the code to make it pass (TDD green)
+   - Run bun test to verify no regressions
+   - Commit
+
+4. Commit: git add the changed files specifically (never git add -A). Commit message format:
+   test(area): describe the edge case found
+
+   Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+5. If you find NO bugs in your chosen area, write an edge case test that passes. Still commit it — test coverage is valuable.
+
+RULES:
+- Tests use bun:test (describe/it/expect pattern)
+- Use bun:sqlite for database tests, not mocks
+- One commit per iteration, one edge case per commit
+- If bun test fails at step 1, fix THAT first before doing new work
+- Read the file BEFORE writing tests — understand existing coverage
+- Keep files reasonable size — extract helpers if needed
+- Do NOT modify README.md or package.json
+- Never use git add -A or git add .
+- Never amend commits — always create new ones

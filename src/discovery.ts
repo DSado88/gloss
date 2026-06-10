@@ -27,10 +27,10 @@ export interface ProjectsRoot {
 /**
  * Resolve the set of scan roots.
  *
- * `GLOSS_PROJECTS_ROOTS="studio=/path/a,mbp=/path/b"` defines multiple roots
- * with explicit source labels (the Studio hosts its own logs plus the synced
- * laptop tree). Otherwise a single root: GLOSS_PROJECTS_DIR or the default
- * ~/.claude/projects, labeled GLOSS_MACHINE_NAME (default "local").
+ * `GLOSS_PROJECTS_ROOTS="server=/path/a,laptop=/path/b"` defines multiple
+ * roots with explicit source labels (a host serving its own logs plus synced
+ * trees from other machines). Otherwise a single root: GLOSS_PROJECTS_DIR or
+ * the default ~/.claude/projects, labeled GLOSS_MACHINE_NAME (default "local").
  */
 export function resolveProjectsRoots(
   env: Record<string, string | undefined> = process.env,

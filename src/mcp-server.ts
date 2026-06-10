@@ -60,8 +60,8 @@ async function glossPost(path: string, body: Record<string, unknown>): Promise<u
 // ---------------------------------------------------------------------------
 // Sync-before-read
 //
-// When this MCP bridge runs on a machine whose logs are rsync'd to the Gloss
-// host (laptop → Studio), GLOSS_SYNC_CMD names the push script. Every tool
+// When this MCP bridge runs on a machine whose logs are rsync'd to a remote
+// Gloss host, GLOSS_SYNC_CMD names the push script. Every tool
 // call runs it first and then forces a server rescan, so queries always see
 // this machine's freshest sessions instead of waiting for the next sync/scan
 // timer. Debounced; best-effort — a failed sync must never break the tool.

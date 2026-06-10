@@ -1,24 +1,32 @@
 #!/bin/zsh
-# Sync Claude Code JSONL logs from this laptop to the Mac Studio.
+# Sync Claude Code JSONL logs from this machine to a remote Gloss server.
 #
 # Safety properties (do not "optimize" these away):
 #   -a               preserves mtimes — canonical ranking tiebreaks depend on them
 #   --delay-updates  every changed file lands via atomic rename at the END of the
-#                    transfer, so Studio Gloss never sees a half-copied file
+#                    transfer, so the server's Gloss never sees a half-copied file
 #   --partial-dir    interrupted transfers resume without corrupting targets
 #   NO --inplace / --append   would write into live files non-atomically
-#   NO --delete               a bad local state must never erase Studio history
+#   NO --delete               a bad local state must never erase server history
 #
-# Usage: sync-to-studio.sh [--dry-run]
+# Configuration (env):
+#   GLOSS_SYNC_DEST   required — rsync destination, e.g.
+#                     user@100.x.y.z:/Users/user/.claude/projects-laptop/
+#                     Point it at a DEDICATED root on the server (not the
+#                     server's own ~/.claude/projects) so source attribution
+#                     stays correct; the server lists it in GLOSS_PROJECTS_ROOTS.
+#   GLOSS_SYNC_SRC    optional — defaults to ~/.claude/projects/
+#
+# Usage: sync-to-server.sh [--dry-run]
 
 set -euo pipefail
 
-# Tailscale IP — plain hostname doesn't resolve from the laptop
-STUDIO_HOST="${GLOSS_STUDIO_HOST:-100.109.110.36}"
-SRC="$HOME/.claude/projects/"
-# Laptop logs land in their own root so source attribution is structural:
-# the Studio serves GLOSS_PROJECTS_ROOTS=studio=~/.claude/projects,mbp=~/.claude/projects-mbp
-DEST="david@${STUDIO_HOST}:/Users/david/.claude/projects-mbp/"
+if [[ -z "${GLOSS_SYNC_DEST:-}" ]]; then
+  echo "GLOSS_SYNC_DEST is not set (e.g. user@server:/path/to/projects-laptop/)" >&2
+  exit 1
+fi
+SRC="${GLOSS_SYNC_SRC:-$HOME/.claude/projects/}"
+DEST="$GLOSS_SYNC_DEST"
 LOG_TAG="gloss-sync"
 
 DRY_RUN=()

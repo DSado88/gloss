@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Gloss server LaunchAgent template (macOS, headless/remote mode).
+
+  Placeholders to replace before installing:
+    __USERNAME__          your macOS username (e.g. alice)
+    __BIND_IP__           interface to bind, e.g. your Tailscale IP
+    __INSTALL_DIR__       where this repo lives, e.g. /Users/alice/gloss
+                          (must NOT be under ~/Documents or ~/Desktop — see
+                          the TCC note in DEPLOY.md)
+    __GLOSS_AUTH_TOKEN__  generate: openssl rand -hex 32
+
+  Install:
+    sed -e "s|__USERNAME__|$(whoami)|g" \
+        -e "s|__BIND_IP__|<your-tailscale-ip>|g" \
+        -e "s|__INSTALL_DIR__|$HOME/gloss|g" \
+        -e "s|__GLOSS_AUTH_TOKEN__|$(openssl rand -hex 32)|g" \
+        deploy/macos/gloss.plist.template \
+        > ~/Library/LaunchAgents/com.gloss.server.plist
+    chmod 600 ~/Library/LaunchAgents/com.gloss.server.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.gloss.server.plist
+
+  See DEPLOY.md for the full runbook.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.gloss.server</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/__USERNAME__/.bun/bin/bun</string>
+    <string>__INSTALL_DIR__/src/cli.ts</string>
+    <string>serve</string>
+    <string>--port</string>
+    <string>3456</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__INSTALL_DIR__</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>GLOSS_REMOTE</key>
+    <string>1</string>
+    <key>GLOSS_BIND_HOST</key>
+    <string>__BIND_IP__</string>
+    <key>GLOSS_AUTH_TOKEN</key>
+    <string>__GLOSS_AUTH_TOKEN__</string>
+    <key>GLOSS_DISABLE_OS_ENDPOINTS</key>
+    <string>1</string>
+    <!-- Multi-machine corpora: native logs + synced trees, attributed by root.
+         Single-machine setups can delete this key (default: ~/.claude/projects). -->
+    <!--
+    <key>GLOSS_PROJECTS_ROOTS</key>
+    <string>server=/Users/__USERNAME__/.claude/projects,laptop=/Users/__USERNAME__/.claude/projects-laptop</string>
+    -->
+    <key>HOME</key>
+    <string>/Users/__USERNAME__</string>
+    <!-- bun's runtime transpiler cache (~/Library/Caches/bun) can wedge and
+         hang module loads under launchd; it only speeds up cold starts -->
+    <key>BUN_RUNTIME_TRANSPILER_CACHE_PATH</key>
+    <string>0</string>
+    <key>PATH</key>
+    <string>/Users/__USERNAME__/.bun/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>15</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/__USERNAME__/Library/Logs/gloss.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/__USERNAME__/Library/Logs/gloss.err.log</string>
+</dict>
+</plist>

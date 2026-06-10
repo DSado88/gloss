@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Client-side LaunchAgent template: sync ~/.claude/projects to the Gloss
+  server every 5 minutes.
+
+  Placeholders to replace before installing:
+    __USERNAME__   your macOS username on this (client) machine
+    __SYNC_DEST__  rsync destination on the server, e.g.
+                   user@server-ip:/Users/user/.claude/projects-laptop/
+
+  The sync script must be copied OUTSIDE ~/Documents (TCC — see DEPLOY.md):
+    mkdir -p ~/.local/bin
+    cp scripts/sync-to-server.sh ~/.local/bin/gloss-sync.sh
+    chmod +x ~/.local/bin/gloss-sync.sh
+
+  Install:
+    sed -e "s|__USERNAME__|$(whoami)|g" \
+        -e "s|__SYNC_DEST__|user@server-ip:/path/to/projects-laptop/|g" \
+        deploy/macos/gloss-sync.plist.template \
+        > ~/Library/LaunchAgents/com.gloss.sync.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.gloss.sync.plist
+
+  Requires SSH key auth to the server.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.gloss.sync</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>/Users/__USERNAME__/.local/bin/gloss-sync.sh</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>GLOSS_SYNC_DEST</key>
+    <string>__SYNC_DEST__</string>
+  </dict>
+
+  <key>StartInterval</key>
+  <integer>300</integer>
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/__USERNAME__/Library/Logs/gloss-sync.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/__USERNAME__/Library/Logs/gloss-sync.err.log</string>
+</dict>
+</plist>
