@@ -45,6 +45,23 @@ export function resolveProjectsRoots(
       const rootPath = part.slice(eq + 1).trim();
       if (source && rootPath) roots.push({ source, path: rootPath });
     }
+    // Nested roots break attribution: the outer root's recursive scan finds
+    // the inner root's files and tags them with the outer source. Siblings
+    // sharing a prefix (/projects vs /projects-mbp) are fine — compare with
+    // a trailing separator.
+    for (const a of roots) {
+      for (const b of roots) {
+        if (a === b) continue;
+        const outer = a.path.endsWith(path.sep) ? a.path : a.path + path.sep;
+        if (b.path.startsWith(outer)) {
+          throw new Error(
+            `GLOSS_PROJECTS_ROOTS: root "${b.source}" (${b.path}) is nested inside ` +
+            `root "${a.source}" (${a.path}) — roots must be disjoint or source ` +
+            `attribution would mislabel the inner root's sessions`,
+          );
+        }
+      }
+    }
     if (roots.length) return roots;
   }
   return [{

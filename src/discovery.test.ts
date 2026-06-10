@@ -940,6 +940,27 @@ describe("multi-root source attribution", () => {
     expect(second.sessions.find((s) => s.id === "old-session")).toBeFalsy();
   });
 
+
+  it("rejects nested roots — outer scan would misattribute the inner root's files", () => {
+    const nested = path.join(rootA, "mbp");
+    fs.mkdirSync(nested, { recursive: true });
+    expect(() =>
+      resolveProjectsRoots({ GLOSS_PROJECTS_ROOTS: `studio=${rootA},mbp=${nested}` }),
+    ).toThrow(/nested/i);
+  });
+
+  it("accepts sibling roots that share a path prefix", () => {
+    // /projects vs /projects-mbp are siblings, not nested — must be allowed
+    const sibling = rootA + "-mbp";
+    fs.mkdirSync(sibling, { recursive: true });
+    try {
+      const roots = resolveProjectsRoots({ GLOSS_PROJECTS_ROOTS: `a=${rootA},b=${sibling}` });
+      expect(roots.length).toBe(2);
+    } finally {
+      fs.rmSync(sibling, { recursive: true, force: true });
+    }
+  });
+
   it("scanAllProjects tags sessions with their root's source", () => {
     writeMinimalJsonl(path.join(rootA, "-Users-x-proj", "aaa.jsonl"), "aaa");
     writeMinimalJsonl(path.join(rootB, "-Users-x-proj", "bbb.jsonl"), "bbb");
