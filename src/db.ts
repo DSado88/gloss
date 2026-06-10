@@ -236,11 +236,21 @@ export class ConvoDb {
     return path.join(path.dirname(this.dbPath), "backups");
   }
 
+  /** Pending journal events while a transaction is open (null = no txn).
+   *  The journal must only record COMMITTED writes — appending mid-transaction
+   *  would leave phantom entries if the transaction rolls back. */
+  private journalBuffer: Array<Record<string, unknown>> | null = null;
+
   /**
    * Append an event to the daily annotation journal. Best-effort: a failed
-   * journal write must never fail the DB write it records.
+   * journal write must never fail the DB write it records. Inside a
+   * transaction, events buffer until commit (dropped on rollback).
    */
   private journalAnnotation(event: Record<string, unknown>): void {
+    if (this.journalBuffer !== null) {
+      this.journalBuffer.push(event);
+      return;
+    }
     const dir = this.backupsDir;
     if (!dir) return;
     try {
@@ -255,9 +265,22 @@ export class ConvoDb {
     }
   }
 
-  /** Run a function inside a BEGIN/COMMIT transaction. */
+  /** Run a function inside a BEGIN/COMMIT transaction. Journal events are
+   *  buffered during the transaction and flushed only after COMMIT. */
   transaction(fn: () => void): void {
-    this.db.transaction(fn)();
+    const isOuter = this.journalBuffer === null;
+    if (isOuter) this.journalBuffer = [];
+    try {
+      this.db.transaction(fn)();
+    } catch (e) {
+      if (isOuter) this.journalBuffer = null; // rolled back — drop events
+      throw e;
+    }
+    if (isOuter) {
+      const events = this.journalBuffer;
+      this.journalBuffer = null;
+      for (const event of events) this.journalAnnotation(event);
+    }
   }
 
   // ---- Sessions -----------------------------------------------------------
@@ -583,7 +606,7 @@ export class ConvoDb {
   // ---- Batch tag replacement -----------------------------------------------
 
   replaceAnnotationTags(annotationId: string, tags: string[]): void {
-    const txn = this.db.transaction(() => {
+    this.transaction(() => {
       // Remove all existing tags for this annotation
       this.db.run("DELETE FROM annotation_tags WHERE annotation_id = ?", [annotationId]);
       // Add new tags
@@ -591,7 +614,6 @@ export class ConvoDb {
         this.addTag(annotationId, tagName);
       }
     });
-    txn();
   }
 
   // ---- Client-ready annotation export ------------------------------------
@@ -618,7 +640,7 @@ export class ConvoDb {
     let imported = 0;
     let skipped = 0;
 
-    const txn = this.db.transaction(() => {
+    this.transaction(() => {
       for (const ann of annotations) {
         // Skip if already exists
         const existing = this.db.query("SELECT id FROM annotations WHERE id = ?").get(ann.id);
@@ -660,7 +682,6 @@ export class ConvoDb {
       }
     });
 
-    txn();
     return { imported, skipped };
   }
 

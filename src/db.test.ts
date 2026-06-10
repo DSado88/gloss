@@ -1522,6 +1522,37 @@ describe("annotation safety", () => {
       expect(typeof events[0].ts).toBe("string");
       expect(new Date(events[0].ts as string).getTime()).toBeGreaterThan(0);
     });
+
+    it("does not journal writes from a rolled-back import transaction", () => {
+      // A mid-import failure rolls back the whole transaction. The journal is
+      // a recovery artifact — it must not record annotations the DB rejected.
+      const good = {
+        id: "rb-good", turnIndex: 1, blockIndex: 0,
+        charStart: 0, charEnd: 4, text: "kept",
+      };
+      const bad = {
+        id: "rb-bad", turnIndex: 1, blockIndex: 0,
+        charStart: undefined as unknown as number, charEnd: 4, text: "boom",
+      };
+      expect(() => db.importAnnotationsJson("as-sess", [good, bad] as never)).toThrow();
+      expect(db.getAnnotation("rb-good")).toBeNull();
+      const journaled = readJournal().filter((e) => e.op === "upsert")
+        .map((e) => (e.annotation as Record<string, unknown>).id);
+      expect(journaled).not.toContain("rb-good");
+      expect(journaled).not.toContain("rb-bad");
+    });
+
+    it("journals committed import transactions after commit", () => {
+      const good = {
+        id: "tx-good", turnIndex: 1, blockIndex: 0,
+        charStart: 0, charEnd: 4, text: "kept",
+      };
+      db.importAnnotationsJson("as-sess", [good] as never);
+      expect(db.getAnnotation("tx-good")).not.toBeNull();
+      const journaled = readJournal().filter((e) => e.op === "upsert")
+        .map((e) => (e.annotation as Record<string, unknown>).id);
+      expect(journaled).toContain("tx-good");
+    });
   });
 
   describe("exportAllAnnotations", () => {
