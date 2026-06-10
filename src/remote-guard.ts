@@ -33,6 +33,16 @@ export function resolveRemoteConfig(
   if (remote && !authToken) {
     throw new Error("GLOSS_REMOTE=1 requires GLOSS_AUTH_TOKEN to be set");
   }
+  // Fail closed: binding a non-loopback interface without remote mode would
+  // expose every route on that interface with no auth at all.
+  const bindHost = env.GLOSS_BIND_HOST || undefined;
+  const loopback = ["127.0.0.1", "localhost", "::1"];
+  if (bindHost && !remote && !loopback.includes(bindHost)) {
+    throw new Error(
+      `GLOSS_BIND_HOST=${bindHost} binds a non-loopback interface — set GLOSS_REMOTE=1 ` +
+      `(with GLOSS_AUTH_TOKEN) so the server requires auth, or bind to 127.0.0.1`,
+    );
+  }
   const disableOsEndpoints =
     env.GLOSS_DISABLE_OS_ENDPOINTS != null
       ? env.GLOSS_DISABLE_OS_ENDPOINTS === "1"
@@ -40,7 +50,7 @@ export function resolveRemoteConfig(
   return {
     remote,
     authToken,
-    bindHost: env.GLOSS_BIND_HOST || undefined,
+    bindHost,
     disableOsEndpoints,
   };
 }

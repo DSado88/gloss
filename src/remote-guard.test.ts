@@ -48,9 +48,23 @@ describe("resolveRemoteConfig", () => {
     expect(cfg.disableOsEndpoints).toBe(false);
   });
 
-  it("passes through GLOSS_BIND_HOST", () => {
-    const cfg = resolveRemoteConfig({ GLOSS_BIND_HOST: "100.109.110.36" });
-    expect(cfg.bindHost).toBe("100.109.110.36");
+  it("throws when GLOSS_BIND_HOST is non-loopback without GLOSS_REMOTE=1 (fail closed)", () => {
+    expect(() => resolveRemoteConfig({ GLOSS_BIND_HOST: "100.100.1.2" })).toThrow(/GLOSS_REMOTE/);
+  });
+
+  it("allows a loopback GLOSS_BIND_HOST without remote mode", () => {
+    const cfg = resolveRemoteConfig({ GLOSS_BIND_HOST: "127.0.0.1" });
+    expect(cfg.bindHost).toBe("127.0.0.1");
+    expect(cfg.remote).toBe(false);
+  });
+
+  it("passes through GLOSS_BIND_HOST in remote mode", () => {
+    const cfg = resolveRemoteConfig({
+      GLOSS_REMOTE: "1",
+      GLOSS_AUTH_TOKEN: TOKEN,
+      GLOSS_BIND_HOST: "100.100.1.2",
+    });
+    expect(cfg.bindHost).toBe("100.100.1.2");
   });
 });
 
@@ -144,6 +158,32 @@ function writeFixtureJsonl(dir: string): string {
   return filePath;
 }
 
+
+// ---------------------------------------------------------------------------
+// OS_ENDPOINTS drift tripwire
+// ---------------------------------------------------------------------------
+
+describe("OS_ENDPOINTS covers every spawning route in server.ts", () => {
+  it("every route handler that spawns a process is in the OS_ENDPOINTS allowlist", () => {
+    // The guard (remote-guard.ts) and the route table (server.ts) are
+    // decoupled. A future OS-driving endpoint added to server.ts without an
+    // OS_ENDPOINTS entry would be silently exposed over the tailnet. This
+    // scans route blocks for process-spawn markers as a drift tripwire.
+    const serverSrc = fs.readFileSync(path.join(import.meta.dir, "server.ts"), "utf-8");
+    const blocks = serverSrc.split(/if \(pathname === "/).slice(1);
+    const offenders: string[] = [];
+    for (const block of blocks) {
+      const route = block.slice(0, block.indexOf('"'));
+      // Scan only this route's block (up to the next route check)
+      const body = block.slice(0, block.indexOf('if (pathname') > 0 ? block.indexOf('if (pathname') : undefined);
+      if (/Bun\.spawnSync\(|Bun\.spawn\(|osascript/.test(body) && !OS_ENDPOINTS.includes(route)) {
+        offenders.push(route);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe("remote mode server integration", () => {
   let tempDir: string;
   let dbDir: string;
@@ -208,11 +248,30 @@ describe("remote mode server integration", () => {
     expect(res.status).toBe(200);
   });
 
-  it("sets a session cookie when authenticating via ?token=", async () => {
-    const res = await fetch(`${baseUrl}/?token=${TOKEN}`, { redirect: "manual" });
-    expect(res.status).toBe(200);
+  it("GET via ?token= sets the cookie and 302-redirects to strip the token from the URL", async () => {
+    const res = await fetch(`${baseUrl}/?token=${TOKEN}&view=grouped`, { redirect: "manual" });
+    expect(res.status).toBe(302);
     const setCookie = res.headers.get("set-cookie") ?? "";
     expect(setCookie).toContain("gloss_token=");
+    const location = res.headers.get("location") ?? "";
+    expect(location).not.toContain("token=");
+    expect(location).toContain("view=grouped");
+  });
+
+  it("following the ?token= redirect with the cookie serves the page", async () => {
+    const first = await fetch(`${baseUrl}/?token=${TOKEN}`, { redirect: "manual" });
+    expect(first.status).toBe(302);
+    const location = first.headers.get("location")!;
+    const res = await fetch(`${baseUrl}${location.startsWith("/") ? location : new URL(location).pathname}`, {
+      headers: { cookie: `gloss_token=${TOKEN}` },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("non-GET requests with ?token= are served directly (no redirect)", async () => {
+    const res = await fetch(`${baseUrl}/api/scan?token=${TOKEN}`, { method: "POST", redirect: "manual" });
+    expect(res.status).not.toBe(302);
+    expect(res.headers.get("set-cookie") ?? "").toContain("gloss_token=");
   });
 
   it("accepts the cookie on subsequent requests", async () => {

@@ -356,7 +356,10 @@ export async function startServer(options: { port?: number } = {}): Promise<void
   const MAX_RESCAN_MS = 5 * 60_000;
   let rescanInterval = MIN_RESCAN_MS;
 
-  // Shared by the timer and POST /api/scan
+  // Shared by the timer and POST /api/scan. Burst scans (e.g. MCP clients
+  // hitting /api/scan) must not stack identical backfill chains — one chain
+  // at a time; the next scan reschedules once it finishes.
+  let backfillInFlight = false;
   const runScan = (): { changedCount: number; total: number } => {
     const { sessions: freshSessions, changedCount } = scanAllProjects();
     syncToDb(db, freshSessions);
@@ -369,10 +372,25 @@ export async function startServer(options: { port?: number } = {}): Promise<void
     }
 
     // Always run backfills (incomplete indexes need catching up too)
-    setTimeout(() => {
-      backfillTurnCounts(db, invalidateIndex);
-      setTimeout(() => backfillFtsIndex(db, startEmbeddingBackfill), 2000);
-    }, 500);
+    if (!backfillInFlight) {
+      backfillInFlight = true;
+      setTimeout(() => {
+        try {
+          backfillTurnCounts(db, invalidateIndex);
+        } catch {
+          // best-effort
+        }
+        setTimeout(() => {
+          try {
+            backfillFtsIndex(db, startEmbeddingBackfill);
+          } catch {
+            // best-effort
+          } finally {
+            backfillInFlight = false;
+          }
+        }, 2000);
+      }, 500);
+    }
 
     return { changedCount, total: freshSessions.length };
   };
@@ -501,9 +519,22 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
       return undefined;
     }
 
-    const res = await route(req, url, pathname);
     // Authenticated via a one-time ?token= link — set the session cookie so
     // subsequent requests (and the WebSocket upgrade) authenticate automatically.
+    // For GETs, redirect to the same URL minus the token: the raw secret must
+    // not linger in the address bar, browser history, or Referer headers.
+    if (authedViaQuery(req, remoteCfg) && req.method === "GET") {
+      const stripped = new URL(url);
+      stripped.searchParams.delete("token");
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: stripped.pathname + stripped.search,
+          "Set-Cookie": buildAuthCookie(remoteCfg),
+        },
+      });
+    }
+    const res = await route(req, url, pathname);
     if (authedViaQuery(req, remoteCfg)) {
       try {
         res.headers.append("Set-Cookie", buildAuthCookie(remoteCfg));
