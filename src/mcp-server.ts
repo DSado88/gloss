@@ -58,6 +58,39 @@ async function glossPost(path: string, body: Record<string, unknown>): Promise<u
 }
 
 // ---------------------------------------------------------------------------
+// Sync-before-read
+//
+// When this MCP bridge runs on a machine whose logs are rsync'd to the Gloss
+// host (laptop → Studio), GLOSS_SYNC_CMD names the push script. Every tool
+// call runs it first and then forces a server rescan, so queries always see
+// this machine's freshest sessions instead of waiting for the next sync/scan
+// timer. Debounced; best-effort — a failed sync must never break the tool.
+// ---------------------------------------------------------------------------
+
+const GLOSS_SYNC_CMD = process.env.GLOSS_SYNC_CMD ?? "";
+const SYNC_DEBOUNCE_MS = 60_000;
+const SYNC_TIMEOUT_MS = 30_000;
+let lastSyncMs = 0;
+
+async function syncBeforeRead(): Promise<void> {
+  if (!GLOSS_SYNC_CMD) return;
+  if (Date.now() - lastSyncMs < SYNC_DEBOUNCE_MS) return;
+  lastSyncMs = Date.now();
+  try {
+    const proc = Bun.spawn(["/bin/sh", "-c", GLOSS_SYNC_CMD], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    const killer = setTimeout(() => proc.kill(), SYNC_TIMEOUT_MS);
+    await proc.exited;
+    clearTimeout(killer);
+    await glossFetch("/api/scan", { method: "POST" });
+  } catch {
+    // best-effort — stale results beat a dead tool
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Format helpers — turn API responses into clean readable text
 // ---------------------------------------------------------------------------
 
@@ -232,6 +265,7 @@ server.tool(
     brief: z.boolean().optional().describe("Return short previews instead of full excerpts (default false)"),
   },
   async (args) => {
+    await syncBeforeRead();
     const data = (await glossPost("/api/search-sources", {
       query: args.query,
       maxSources: args.maxSources ?? 6,
@@ -258,6 +292,7 @@ server.tool(
     endTurn: z.number().int().min(0).optional().describe("Last turn index to read (default: startTurn + 30)"),
   },
   async (args) => {
+    await syncBeforeRead();
     const id = encodeURIComponent(args.sessionId);
     const start = args.startTurn ?? 0;
     const end = args.endTurn ?? start + MAX_READ_WINDOW - 1;
@@ -306,6 +341,7 @@ server.tool(
     limit: z.number().int().min(1).max(100).optional().describe("Max results (default 30)"),
   },
   async (args) => {
+    await syncBeforeRead();
     const params = new URLSearchParams();
     if (args.search) params.set("q", args.search);
     if (args.sessionId) params.set("session", args.sessionId);
@@ -332,6 +368,7 @@ server.tool(
     limit: z.number().int().min(1).max(100).optional().describe("Max sessions to return (default 20)"),
   },
   async (args) => {
+    await syncBeforeRead();
     const params = new URLSearchParams();
     if (args.project) params.set("project", args.project);
     params.set("limit", String(args.limit ?? 20));
@@ -352,6 +389,7 @@ server.tool(
     "Use this to discover available tags before filtering highlights with get_highlights(tag=...).",
   {},
   async () => {
+    await syncBeforeRead();
     const tags = (await glossFetch("/api/tags")) as Array<{ name: string; count: number; color?: string }>;
     if (tags.length === 0) {
       return { content: [{ type: "text" as const, text: "No tags found. Highlights haven't been tagged yet." }] };

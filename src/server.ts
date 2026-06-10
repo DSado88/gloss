@@ -356,24 +356,31 @@ export async function startServer(options: { port?: number } = {}): Promise<void
   const MAX_RESCAN_MS = 5 * 60_000;
   let rescanInterval = MIN_RESCAN_MS;
 
+  // Shared by the timer and POST /api/scan
+  const runScan = (): { changedCount: number; total: number } => {
+    const { sessions: freshSessions, changedCount } = scanAllProjects();
+    syncToDb(db, freshSessions);
+
+    if (changedCount > 0) {
+      rescanInterval = MIN_RESCAN_MS; // Reset on changes
+      indexHtmlCache = null; // Invalidate index page cache
+    } else {
+      rescanInterval = Math.min(rescanInterval * 1.5, MAX_RESCAN_MS);
+    }
+
+    // Always run backfills (incomplete indexes need catching up too)
+    setTimeout(() => {
+      backfillTurnCounts(db, invalidateIndex);
+      setTimeout(() => backfillFtsIndex(db, startEmbeddingBackfill), 2000);
+    }, 500);
+
+    return { changedCount, total: freshSessions.length };
+  };
+
   const scheduleRescan = () => {
     setTimeout(() => {
       try {
-        const { sessions: freshSessions, changedCount } = scanAllProjects();
-        syncToDb(db, freshSessions);
-
-        if (changedCount > 0) {
-          rescanInterval = MIN_RESCAN_MS; // Reset on changes
-          indexHtmlCache = null; // Invalidate index page cache
-        } else {
-          rescanInterval = Math.min(rescanInterval * 1.5, MAX_RESCAN_MS);
-        }
-
-        // Always run backfills (incomplete indexes need catching up too)
-        setTimeout(() => {
-          backfillTurnCounts(db, invalidateIndex);
-          setTimeout(() => backfillFtsIndex(db, startEmbeddingBackfill), 2000);
-        }, 500);
+        runScan();
       } catch {
         // best-effort
       }
@@ -392,6 +399,7 @@ export async function startServer(options: { port?: number } = {}): Promise<void
     search: { embeddingEngine, vectorIndex },
     includeThinking,
     includeTools,
+    onScanRequest: runScan,
   });
 
   const server = Bun.serve<{ sessionId: string }>({
@@ -460,6 +468,9 @@ export interface RequestHandlerDeps {
   search?: { embeddingEngine?: EmbeddingEngine; vectorIndex?: VectorIndex | null };
   includeThinking?: boolean;
   includeTools?: boolean;
+  /** Force an immediate rescan (POST /api/scan). Sync clients call this after
+   *  pushing fresh JSONL so new sessions appear without waiting for the timer. */
+  onScanRequest?: () => { changedCount: number; total: number };
 }
 
 interface UpgradeServer {
@@ -755,6 +766,25 @@ export function createRequestHandler(deps: RequestHandlerDeps) {
           });
           const output = proc.stdout.toString() + proc.stderr.toString();
           return new Response(JSON.stringify({ ok: proc.exitCode === 0, output }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        } catch (e) {
+          return new Response(JSON.stringify({ error: String(e) }), {
+            status: 500, headers: { "Content-Type": "application/json" },
+          });
+        }
+      }
+
+      // Force rescan
+      if (pathname === "/api/scan" && req.method === "POST") {
+        if (!deps.onScanRequest) {
+          return new Response(JSON.stringify({ error: "Scan not available" }), {
+            status: 503, headers: { "Content-Type": "application/json" },
+          });
+        }
+        try {
+          const result = deps.onScanRequest();
+          return new Response(JSON.stringify({ ok: true, ...result }), {
             headers: { "Content-Type": "application/json" },
           });
         } catch (e) {

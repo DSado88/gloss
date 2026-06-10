@@ -65,3 +65,28 @@ describe("mcp-server source integrity", () => {
     expect(listTagsSection![0]).not.toMatch(/\bfetch\(/);
   });
 });
+
+describe("sync-before-read", () => {
+  const src = fs.readFileSync(
+    path.join(import.meta.dir, "mcp-server.ts"),
+    "utf-8",
+  );
+
+  it("defines a debounced GLOSS_SYNC_CMD hook that triggers a server rescan", () => {
+    // When the laptop queries the Studio, its freshest logs must be pushed
+    // first (rsync) and the Studio told to rescan, or new sessions are
+    // invisible until the next timer tick.
+    expect(src).toContain("GLOSS_SYNC_CMD");
+    expect(src).toContain("syncBeforeRead");
+    expect(src).toContain("SYNC_DEBOUNCE_MS");
+    expect(src).toMatch(/\/api\/scan/);
+  });
+
+  it("every tool handler awaits syncBeforeRead as step one", () => {
+    const toolSections = [...src.matchAll(/server\.tool\(\s*"(\w+)"[\s\S]*?\n\);/g)];
+    expect(toolSections.length).toBeGreaterThanOrEqual(5);
+    for (const m of toolSections) {
+      expect(m[0]).toContain("await syncBeforeRead()");
+    }
+  });
+});

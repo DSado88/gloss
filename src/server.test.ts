@@ -932,3 +932,47 @@ describe("annotation anchor context via API", () => {
     expect(ann.trigger).toBe("updated trigger");
   });
 });
+
+// ---------------------------------------------------------------------------
+// POST /api/scan — force an immediate rescan (sync clients call this after
+// pushing fresh JSONL so new sessions appear without waiting for the timer)
+// ---------------------------------------------------------------------------
+
+describe("POST /api/scan", () => {
+  const fakeServer = { upgrade: () => false };
+
+  it("invokes the scan hook and returns its counts", async () => {
+    const { createRequestHandler } = await import("./server.js");
+    const dbDir = fs.mkdtempSync(path.join(os.tmpdir(), "convo-scan-db-"));
+    const db = openDb(path.join(dbDir, "test.sqlite"));
+    let calls = 0;
+    const handler = createRequestHandler({
+      db,
+      port: 13458,
+      onScanRequest: () => {
+        calls++;
+        return { changedCount: 3, total: 42 };
+      },
+    });
+    const res = (await handler(new Request("http://localhost/api/scan", { method: "POST" }), fakeServer))!;
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.ok).toBe(true);
+    expect(body.changedCount).toBe(3);
+    expect(body.total).toBe(42);
+    expect(calls).toBe(1);
+    db.close();
+    fs.rmSync(dbDir, { recursive: true, force: true });
+  });
+
+  it("returns 503 when no scan hook is wired", async () => {
+    const { createRequestHandler } = await import("./server.js");
+    const dbDir = fs.mkdtempSync(path.join(os.tmpdir(), "convo-scan-db2-"));
+    const db = openDb(path.join(dbDir, "test.sqlite"));
+    const handler = createRequestHandler({ db, port: 13458 });
+    const res = (await handler(new Request("http://localhost/api/scan", { method: "POST" }), fakeServer))!;
+    expect(res.status).toBe(503);
+    db.close();
+    fs.rmSync(dbDir, { recursive: true, force: true });
+  });
+});
