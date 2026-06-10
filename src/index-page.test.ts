@@ -627,6 +627,18 @@ describe("source toggle", () => {
     expect(html).toContain("toggleSource");
   });
 
+  it("places the source row inside the settings menu, not the toolbar", () => {
+    const html = buildServerIndex([{ id: "s1", source_machine: "mbp" }] as any);
+    const settingsStart = html.indexOf('id="settingsDrop"');
+    const settingsEnd = html.indexOf('id="settingSaved"');
+    const sourceRow = html.indexOf('id="sourceRow"');
+    const chips = html.indexOf('id="sourceChips"');
+    expect(sourceRow).toBeGreaterThan(settingsStart);
+    expect(sourceRow).toBeLessThan(settingsEnd);
+    expect(chips).toBeGreaterThan(settingsStart);
+    expect(chips).toBeLessThan(settingsEnd);
+  });
+
   it("defaults source to empty string when unattributed", () => {
     const html = buildServerIndex([{ id: "s1" }] as any);
     expect(html).toContain('"source":""');

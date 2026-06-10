@@ -760,7 +760,6 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
     <input class="search" id="search" type="text" placeholder="Search or ask a question..." autofocus>
     <button class="view-btn" id="askBtn" onclick="askAI()" style="display:none">Ask AI</button>
     <button class="view-btn" id="groupBtn" onclick="toggleGroup()">Group projects</button>
-    <span id="sourceChips" style="display:flex;gap:4px"></span>
     <div class="filter-wrap">
       <button class="view-btn filter-btn" id="filterBtn" onclick="toggleFilter()">Filter</button>
       <div class="filter-drop" id="filterDrop"></div>
@@ -789,6 +788,15 @@ export function buildServerIndex(sessions: SessionRecord[], settings?: { embeddi
           <div class="setting-row">
             <div class="setting-label">Show hidden sessions</div>
             <div class="setting-toggle" id="hiddenToggle" onclick="toggleShowHidden()"></div>
+          </div>
+        </div>
+        <div id="sourceRow" style="display:none;margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border)">
+          <div class="setting-row">
+            <div>
+              <div class="setting-label">Sources</div>
+              <div class="setting-note">Show sessions from these machines</div>
+            </div>
+            <div id="sourceChips" style="display:flex;gap:4px"></div>
           </div>
         </div>
         <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border)">
@@ -1256,22 +1264,26 @@ document.addEventListener('click', function(e) {
 document.getElementById('filterBtn').classList.toggle('has-muted', mutedProjects.size > 0);
 
 // --- Source toggle (MBP vs Studio) ---
-// Chips appear only when the corpus has logs from more than one machine.
+// Lives in the Settings menu; the row appears only when the corpus has logs
+// from more than one machine.
 function buildSourceChips() {
   const wrap = document.getElementById('sourceChips');
-  if (!wrap) return;
+  const row = document.getElementById('sourceRow');
+  if (!wrap || !row) return;
   const counts = new Map();
   for (const s of ALL) {
     const key = s.source || 'unknown';
     counts.set(key, (counts.get(key) || 0) + 1);
   }
   const sources = [...counts.keys()].sort();
-  if (sources.length < 2) { wrap.innerHTML = ''; return; }
+  if (sources.length < 2) { wrap.innerHTML = ''; row.style.display = 'none'; return; }
+  row.style.display = '';
   let html = '';
   for (const src of sources) {
     const on = !mutedSources.has(src);
     html += '<button class="view-btn' + (on ? ' active' : '') + '" data-source="' + esc(src) + '" ' +
-      'onclick="toggleSource(this.dataset.source)" title="' + counts.get(src) + ' sessions">' +
+      'onclick="toggleSource(this.dataset.source)" title="' + counts.get(src) + ' sessions" ' +
+      'style="padding:4px 8px;font-size:0.75rem">' +
       esc(src) + '</button>';
   }
   wrap.innerHTML = html;
