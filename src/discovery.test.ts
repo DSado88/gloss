@@ -920,6 +920,26 @@ describe("multi-root source attribution", () => {
     expect(second.changedCount).toBe(0);
   });
 
+
+  it("re-reads a file whose content and size changed but mtime was preserved (backdated sync)", () => {
+    // rsync -a / cp -p / restores preserve mtimes. A synced-over file with the
+    // same mtime but different content must not be served from the cache.
+    const file = path.join(rootA, "-Users-x-proj", "swap.jsonl");
+    writeMinimalJsonl(file, "old-session");
+    const mtime = new Date("2026-01-01T00:00:00Z");
+    fs.utimesSync(file, mtime, mtime);
+    const first = scanAllProjects([{ source: "a", path: rootA }]);
+    expect(first.sessions.find((s) => s.id === "old-session")).toBeTruthy();
+
+    // Rewrite with different content (different size + session id), restore mtime
+    fs.writeFileSync(file, JSON.stringify({ type: "summary", sessionId: "new-session", cwd: "/x", extra: "pad-to-change-size" }) + "\n");
+    fs.utimesSync(file, mtime, mtime);
+
+    const second = scanAllProjects([{ source: "a", path: rootA }]);
+    expect(second.sessions.find((s) => s.id === "new-session")).toBeTruthy();
+    expect(second.sessions.find((s) => s.id === "old-session")).toBeFalsy();
+  });
+
   it("scanAllProjects tags sessions with their root's source", () => {
     writeMinimalJsonl(path.join(rootA, "-Users-x-proj", "aaa.jsonl"), "aaa");
     writeMinimalJsonl(path.join(rootB, "-Users-x-proj", "bbb.jsonl"), "bbb");

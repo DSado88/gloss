@@ -117,8 +117,10 @@ export function chooseCanonicalSession(candidates: DiscoveredSession[]): Discove
   return best;
 }
 
-/** Cache of previously discovered sessions, keyed by JSONL path. */
-const discoveryCache = new Map<string, { mtimeMs: number; session: DiscoveredSession }>();
+/** Cache of previously discovered sessions, keyed by JSONL path.
+ *  Keyed on mtime AND size — sync tools (rsync -a, cp -p) preserve mtimes,
+ *  so mtime alone misses synced-over content. Mirrors statusNeedsIndexing. */
+const discoveryCache = new Map<string, { mtimeMs: number; size: number; session: DiscoveredSession }>();
 
 /** Clear the discovery cache (useful for tests). */
 export function clearDiscoveryCache(): void {
@@ -185,9 +187,9 @@ export function scanProjectsDir(
       const stat = fs.statSync(filePath);
       currentPaths.add(filePath);
 
-      // Check mtime cache: skip the expensive 32KB read + parse if unchanged
+      // Check mtime+size cache: skip the expensive 32KB read + parse if unchanged
       const cached = discoveryCache.get(filePath);
-      if (cached && cached.mtimeMs === stat.mtimeMs) {
+      if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
         sessions.push(cached.session);
         continue;
       }
@@ -223,7 +225,7 @@ export function scanProjectsDir(
         fileSize: stat.size,
         hasParsedSessionId: meta.sessionId != null,
       };
-      discoveryCache.set(filePath, { mtimeMs: stat.mtimeMs, session });
+      discoveryCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, session });
       sessions.push(session);
     } catch {
       // Skip unreadable files
