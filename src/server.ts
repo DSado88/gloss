@@ -17,6 +17,7 @@ import { EmbeddingEngine, VectorIndex } from "./embeddings.js";
 import { backfillEmbeddings } from "./indexer.js";
 import { resolveRemoteConfig, guardRequest, authedViaQuery, buildAuthCookie, type RemoteConfig } from "./remote-guard.js";
 import type { Turn, TextBlock, TocEntry } from "./types.js";
+import { identityOfBytes } from "./source-identity.js";
 import type { ServerWebSocket } from "bun";
 
 // ---------------------------------------------------------------------------
@@ -1185,8 +1186,11 @@ async function handleApiRouteInner(
     } catch {
       return new Response(JSON.stringify({ error: "Could not stat file" }), { status: 500, headers: jsonHeaders });
     }
+    // One read: `source` names exactly the bytes these turns were parsed from.
+    const bytes = fs.readFileSync(session.jsonl_path);
+    const source = identityOfBytes(session.jsonl_path, bytes);
     const parser = createConversationParser();
-    parser.feedLines(fs.readFileSync(session.jsonl_path, "utf-8").split("\n"));
+    parser.feedLines(bytes.toString("utf-8").split("\n"));
     const allTurns = parser.getTurns();
 
     // Optional server-side range slicing — avoids sending full transcript over HTTP
@@ -1206,9 +1210,10 @@ async function handleApiRouteInner(
       text: turn.blocks
         .filter((b): b is TextBlock => b.type === "text")
         .map((b) => b.text || ""),
+      uuid: turn.uuid ?? null,
     }));
     const meta = { totalTurns: allTurns.length, start, end };
-    return new Response(JSON.stringify({ turns: convoData, ...meta }), { headers: jsonHeaders });
+    return new Response(JSON.stringify({ turns: convoData, ...meta, source }), { headers: jsonHeaders });
   }
 
   // POST /api/search-sources — retrieval only (no LLM synthesis)
@@ -1235,6 +1240,7 @@ async function handleApiRouteInner(
       endTurnIndex: s.startTurnIndex + s.turns.length - 1,
       score: s.score != null ? Math.round(s.score * 1000) / 1000 : undefined,
       matchedTokens: s.matchedTokens,
+      source: s.source ?? null,
       turns: s.turns.map((t, ti) => ({
         role: t.role,
         index: s.startTurnIndex + ti,
@@ -1242,6 +1248,7 @@ async function handleApiRouteInner(
           .filter((b): b is TextBlock => b.type === "text")
           .map((b) => b.text || "")
           .join("\n"),
+        uuid: t.uuid ?? null,
       })),
     }));
     return new Response(JSON.stringify({ query: q, sources, timing: result.timing }), { headers: jsonHeaders });

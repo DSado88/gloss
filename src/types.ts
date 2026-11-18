@@ -46,6 +46,8 @@ export interface Turn {
   role: "user" | "assistant";
   timestamp?: string;
   blocks: Block[];
+  /** The `uuid` of the transcript line that began this turn (Claude Code transcripts): a stable turn identity. */
+  uuid?: string;
 }
 
 export interface Conversation {

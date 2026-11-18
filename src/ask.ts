@@ -4,6 +4,7 @@ import type { ConvoDb } from "./db.js";
 import { createConversationParser } from "./parser-factory.js";
 import type { Turn } from "./types.js";
 import type { EmbeddingEngine, VectorIndex } from "./embeddings.js";
+import { identityOfBytes, type SourceIdentity } from "./source-identity.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -18,6 +19,8 @@ export interface AskSource {
   startTurnIndex: number;
   score?: number;
   matchedTokens?: string[];
+  /** The file these turns were read from, and the exact bytes. */
+  source?: SourceIdentity;
 }
 
 export interface AskResult {
@@ -451,8 +454,11 @@ async function searchForSourcesInner(
     if (sessionsLoaded > 0 && bytesRead + stat.size > maxTotalSourceBytes) continue;
 
     let allTurns: Turn[];
+    let source: SourceIdentity;
     try {
-      const content = await fs.promises.readFile(session.jsonl_path, "utf-8");
+      const bytes = await fs.promises.readFile(session.jsonl_path);
+      source = identityOfBytes(session.jsonl_path, bytes);
+      const content = bytes.toString("utf-8");
       bytesRead += stat.size;
       sessionsLoaded++;
       const parser = createConversationParser();
@@ -511,6 +517,7 @@ async function searchForSourcesInner(
         startTurnIndex: lo,
         score: finalScores.get(sessionId),
         matchedTokens: localTerms.length > 0 ? localTerms : ftsTokens,
+        source,
       });
     }
   }

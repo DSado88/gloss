@@ -223,7 +223,7 @@ export class IncrementalParser implements ConversationParser {
         this.currentTurn.blocks.push(...parsedBlocks);
         updates.push({ type: "update_turn", turnIndex: this.turns.length - 1, turn: this.currentTurn });
       } else {
-        this.currentTurn = { role, timestamp, blocks: parsedBlocks };
+        this.currentTurn = { role, timestamp, blocks: parsedBlocks, ...(typeof obj.uuid === "string" ? { uuid: obj.uuid } : {}) };
         this.turns.push(this.currentTurn);
         const idx = this.turns.length - 1;
         updates.push({ type: "new_turn", turnIndex: idx, turn: this.currentTurn });
